@@ -19,5 +19,16 @@ public class PrinterDevice {
     private String printerMacAddress;
     private PrinterStatus printerStatus;
     private int printerTotalPrintedPages;
-    private Map<String, String> additionalAttributes=new ConcurrentHashMap<>();
+
+    // New detailed toner levels
+    private int blackTonerLevel;
+    private int cyanTonerLevel;
+    private int magentaTonerLevel;
+    private int yellowTonerLevel;
+
+    // Product Number and Serial Number details
+    private String productNumber;
+    private String serialNumber;
+
+    private Map<String, String> additionalAttributes = new ConcurrentHashMap<>();
 }
