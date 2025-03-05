@@ -23,7 +23,71 @@ public class PrinterDiscoveryManager {
         );
     }
 
-    // [Previous methods remain the same]
+    public List<PrinterDevice> discoverPrinters(String subnet) {
+        List<PrinterDevice> discoveredPrinters = new CopyOnWriteArrayList<>();
+
+        List<Callable<PrinterDevice>> scanTasks = new ArrayList<>();
+        for (int i = 1; i <= 254; i++) {
+            final String ip = subnet + "." + i;
+            scanTasks.add(() -> scanPrinterHost(ip));
+        }
+
+        try {
+            List<Future<PrinterDevice>> results = scanExecutor.invokeAll(
+                    scanTasks, 300, TimeUnit.SECONDS
+            );
+
+            results.stream()
+                    .map(this::getResultSafely)
+                    .filter(Objects::nonNull)
+                    .forEach(discoveredPrinters::add);
+
+        } catch (InterruptedException e) {
+            log.warn("Printer discovery process interrupted", e);
+            Thread.currentThread().interrupt();
+        }
+
+        return discoveredPrinters;
+    }
+
+    private PrinterDevice getResultSafely(Future<PrinterDevice> future) {
+        try {
+            return future.get();
+        } catch (Exception e) {
+            log.debug("Error retrieving printer scan result", e);
+            return null;
+        }
+    }
+
+    private PrinterDevice scanPrinterHost(String ipAddress) {
+        for (String communityString : PrinterDiscoveryConfig.COMMUNITY) {
+            try (TransportMapping<UdpAddress> transport = new DefaultUdpTransportMapping()) {
+                Snmp snmp = new Snmp(transport);
+                transport.listen();
+
+                CommunityTarget target = createSnmpTarget(ipAddress, communityString);
+                PDU pdu = createDetailedDiscoveryPDU();
+
+                ResponseEvent response = snmp.send(pdu, target);
+                if (isValidPrinterResponse(response)) {
+                    return extractPrinterDevice(response, ipAddress);
+                }
+            } catch (IOException e) {
+                log.trace("Communication error scanning {}", ipAddress);
+            }
+        }
+        return null;
+    }
+
+    private CommunityTarget createSnmpTarget(String ipAddress, String communityString) {
+        CommunityTarget target = new CommunityTarget();
+        target.setCommunity(new OctetString(communityString));
+        target.setAddress(new UdpAddress(ipAddress + "/161"));
+        target.setRetries(1);
+        target.setTimeout(1000);
+        target.setVersion(SnmpConstants.version2c);
+        return target;
+    }
 
     private PDU createDetailedDiscoveryPDU() {
         PDU pdu = new PDU();
@@ -39,6 +103,12 @@ public class PrinterDiscoveryManager {
         pdu.add(new VariableBinding(new OID(PrinterDiscoveryConfig.YELLOW_TONER_LEVEL)));
         pdu.setType(PDU.GET);
         return pdu;
+    }
+
+    private boolean isValidPrinterResponse(ResponseEvent response) {
+        return response != null
+                && response.getResponse() != null
+                && !response.getResponse().getVariableBindings().isEmpty();
     }
 
     private PrinterDevice extractPrinterDevice(ResponseEvent response, String ipAddress) {
@@ -58,7 +128,6 @@ public class PrinterDiscoveryManager {
                     deviceBuilder.printerModelName(value);
                     break;
                 case PrinterDiscoveryConfig.PRINTER_SERIAL_NUMBER:
-                    // Handle complex serial number format
                     String[] serialParts = value.split(";");
                     if (serialParts.length > 1) {
                         deviceBuilder.productNumber(serialParts[0].trim());
@@ -94,7 +163,6 @@ public class PrinterDiscoveryManager {
     }
 
     private String formatMacAddress(String macValue) {
-        // Convert byte array representation to standard MAC address format
         if (macValue.length() >= 6) {
             byte[] macBytes = macValue.getBytes();
             StringBuilder formattedMac = new StringBuilder();
