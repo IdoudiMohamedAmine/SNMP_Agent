@@ -1,7 +1,6 @@
 package dev.amine.SNMP;
 
 import lombok.*;
-
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -12,23 +11,61 @@ import java.util.concurrent.ConcurrentHashMap;
 @NoArgsConstructor
 @AllArgsConstructor
 public class PrinterDevice {
+    // Basic network properties
     private String ipAddress;
+    private String macAddress;
+    private String systemName;
+    private String systemLocation;
+
+    // Printer identification
     private String systemDescription;
-    private String printerModelName;
-    private String printerSerialNumber;
-    private String printerMacAddress;
-    private PrinterStatus printerStatus;
-    private int printerTotalPrintedPages;
+    private String modelName;
+    private String consoleMessage;
 
-    // New detailed toner levels
-    private int blackTonerLevel;
-    private int cyanTonerLevel;
-    private int magentaTonerLevel;
-    private int yellowTonerLevel;
+    // Operational status
+    private PrinterStatus status;
+    private String statusMessage;
 
-    // Product Number and Serial Number details
-    private String productNumber;
-    private String serialNumber;
+    // Counter information
+    private long totalPageCount;
 
+    // Supply information - using Maps to support variable supply configurations
+    private Map<String, Integer> supplyLevels = new ConcurrentHashMap<>();
+    private Map<String, Integer> supplyMaxLevels = new ConcurrentHashMap<>();
+    private Map<String, String> supplyDescriptions = new ConcurrentHashMap<>();
+    private Map<String, String> supplyTypes = new ConcurrentHashMap<>();
+
+    // Free-form additional attributes for extensibility
     private Map<String, String> additionalAttributes = new ConcurrentHashMap<>();
+
+    /**
+     * Get the percentage remaining for a specific supply
+     */
+    public Integer getSupplyPercentage(String supplyName) {
+        Integer currentLevel = supplyLevels.get(supplyName);
+        Integer maxLevel = supplyMaxLevels.get(supplyName);
+
+        if (currentLevel != null && maxLevel != null && maxLevel > 0) {
+            return (int)(((double)currentLevel / maxLevel) * 100);
+        }
+        return null;
+    }
+
+    /**
+     * Add a supply with its current level, max level, description and type
+     */
+    public void addSupply(String name, Integer level, Integer maxLevel, String description, String type) {
+        if (level != null) {
+            supplyLevels.put(name, level);
+        }
+        if (maxLevel != null) {
+            supplyMaxLevels.put(name, maxLevel);
+        }
+        if (description != null) {
+            supplyDescriptions.put(name, description);
+        }
+        if (type != null) {
+            supplyTypes.put(name, type);
+        }
+    }
 }
