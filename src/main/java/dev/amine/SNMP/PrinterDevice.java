@@ -11,35 +11,41 @@ import java.util.concurrent.ConcurrentHashMap;
 @NoArgsConstructor
 @AllArgsConstructor
 public class PrinterDevice {
+    // Existing supply maps
+    @Builder.Default private Map<String, Integer> supplyLevels = new ConcurrentHashMap<>();
+    @Builder.Default private Map<String, Integer> supplyMaxLevels = new ConcurrentHashMap<>();
+    @Builder.Default private Map<String, String> supplyDescriptions = new ConcurrentHashMap<>();
+
+    // New paper tray maps
+    @Builder.Default private Map<String, Integer> trayLevels = new ConcurrentHashMap<>();
+    @Builder.Default private Map<String, Integer> trayMaxLevels = new ConcurrentHashMap<>();
+    @Builder.Default private Map<String, String> trayDescriptions = new ConcurrentHashMap<>();
+
+    // Basic info
     private String ipAddress;
     private String macAddress;
-    private String systemName;
-    private String systemLocation;
-    private String systemDescription;
     private String modelName;
-    private String consoleMessage;
-    private PrinterStatus status;
-    private String statusMessage;
+    private String serialNumber;
+
+    // Page counts
     private long totalPageCount;
-    private Map<String, Integer> supplyLevels = new ConcurrentHashMap<>();
-    private Map<String, Integer> supplyMaxLevels = new ConcurrentHashMap<>();
-    private Map<String, String> supplyDescriptions = new ConcurrentHashMap<>();
-    private Map<String, String> supplyTypes = new ConcurrentHashMap<>();
-    private Map<String, String> additionalAttributes = new ConcurrentHashMap<>();
+    private long colorPageCount;
+    private long monoPageCount;
+
+    // Status
+    private PrinterStatus status;
 
     public Integer getSupplyPercentage(String supplyName) {
-        Integer currentLevel = supplyLevels.get(supplyName);
-        Integer maxLevel = supplyMaxLevels.get(supplyName);
-        if (currentLevel != null && maxLevel != null && maxLevel > 0) {
-            return (int) (((double) currentLevel / maxLevel) * 100);
-        }
-        return null;
+        Integer current = supplyLevels.get(supplyName);
+        Integer max = supplyMaxLevels.get(supplyName);
+        if (current == null || max == null || max <= 0) return null;
+        return (int) ((double) current / max * 100);
     }
 
-    public void addSupply(String name, Integer level, Integer maxLevel, String description, String type) {
-        if (level != null) supplyLevels.put(name, level);
-        if (maxLevel != null) supplyMaxLevels.put(name, maxLevel);
-        if (description != null) supplyDescriptions.put(name, description);
-        if (type != null) supplyTypes.put(name, type);
+    public Integer getTrayPercentage(String trayName) {
+        Integer current = trayLevels.get(trayName);
+        Integer max = trayMaxLevels.get(trayName);
+        if (current == null || max == null || max <= 0) return null;
+        return (int) ((double) current / max * 100);
     }
 }
