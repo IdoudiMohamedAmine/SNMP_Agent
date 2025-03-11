@@ -7,6 +7,7 @@ import org.snmp4j.smi.*;
 import org.snmp4j.transport.DefaultUdpTransportMapping;
 import org.snmp4j.util.*;
 import lombok.extern.slf4j.Slf4j;
+
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
@@ -321,17 +322,35 @@ public class PrinterDiscoveryManager {
         if (variable == null) return null;
 
         try {
-            byte[] macBytes = variable.toString().getBytes();
-            StringBuilder macBuilder = new StringBuilder();
+            // MAC address should be an OctetString with raw bytes
+            if (variable instanceof OctetString) {
+                byte[] macBytes = ((OctetString) variable).toByteArray();
 
-            for (int i = 0; i < macBytes.length; i++) {
-                macBuilder.append(String.format("%02X", macBytes[i]));
-                if (i < macBytes.length - 1) {
-                    macBuilder.append(":");
+                // Typical MAC address has 6 bytes
+                if (macBytes.length == 6) {
+                    return String.format("%02X:%02X:%02X:%02X:%02X:%02X",
+                            macBytes[0] & 0xFF,
+                            macBytes[1] & 0xFF,
+                            macBytes[2] & 0xFF,
+                            macBytes[3] & 0xFF,
+                            macBytes[4] & 0xFF,
+                            macBytes[5] & 0xFF);
+                }
+                // Some devices might return longer byte arrays (include ASCII or other info)
+                // Try to extract last 6 bytes if possible
+                if (macBytes.length > 6) {
+                    int start = macBytes.length - 6;
+                    return String.format("%02X:%02X:%02X:%02X:%02X:%02X",
+                            macBytes[start] & 0xFF,
+                            macBytes[start + 1] & 0xFF,
+                            macBytes[start + 2] & 0xFF,
+                            macBytes[start + 3] & 0xFF,
+                            macBytes[start + 4] & 0xFF,
+                            macBytes[start + 5] & 0xFF);
                 }
             }
-
-            return macBuilder.toString();
+            // Fallback for unexpected formats
+            return variable.toString();
         } catch (Exception e) {
             log.debug("Error formatting MAC address: {}", e.getMessage());
             return variable.toString();
