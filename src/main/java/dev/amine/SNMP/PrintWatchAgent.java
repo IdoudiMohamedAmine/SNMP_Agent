@@ -17,32 +17,43 @@ public class PrintWatchAgent {
     }
 
     private static void printPrinterDetails(PrinterDevice printer) {
-        log.info("\n=== Printer Details ===");
-        log.info("IP Address: {}", printer.getIpAddress());
-        log.info("MAC Address: {}", printer.getMacAddress());
-        log.info("Model: {}", printer.getModelName());
-        log.info("Serial Number: {}", printer.getSerialNumber());
-        log.info("Status: {}", printer.getStatus());
-        log.info("Total Pages Printed: {}", printer.getTotalPageCount());
-        log.info("Color Pages: {}", printer.getColorPageCount());
-        log.info("Monochrome Pages: {}", printer.getMonoPageCount());
+        log.info("\n========== Printer Details ==========");
+        log.info("IP Address:     {}", printer.getIpAddress());
+        log.info("MAC Address:    {}", printer.getMacAddress() != null ? printer.getMacAddress() : "Unknown");
+        log.info("Model:          {}", printer.getModelName() != null ? printer.getModelName() : "Unknown");
+        log.info("Serial Number:  {}", printer.getSerialNumber() != null ? printer.getSerialNumber() : "Unknown");
+        log.info("Vendor:         {}", printer.getVendor() != null ? printer.getVendor() : "Unknown");
+        log.info("Status:         {}", printer.getStatus());
 
-        log.info("\nToner Levels:");
-        printer.getSupplyLevels().forEach((name, level) -> {
-            Integer max = printer.getSupplyMaxLevels().get(name);
-            Integer percent = printer.getSupplyPercentage(name);
-            String percentDisplay = (percent != null) ? percent + "%" : "N/A";
-            log.info(" - {}: {} ({} of {})", name, percentDisplay, level, max);
-        });
+        // Page counts
+        log.info("\n--- Page Counts ---");
+        log.info("Total Pages:    {}", printer.getTotalPageCount() != null ?
+                printer.getTotalPageCount().toString() : "Unknown");
+        log.info("Color Pages:    {}", printer.getColorPageCount() != null ?
+                printer.getColorPageCount().toString() : "Unknown");
+        log.info("Mono Pages:     {}", printer.getMonoPageCount() != null ?
+                printer.getMonoPageCount().toString() : "Unknown");
 
-        log.info("\nPaper Trays:");
-        printer.getTrayLevels().forEach((name, level) -> {
-            Integer max = printer.getTrayMaxLevels().get(name);
-            Integer percent = printer.getTrayPercentage(name);
-            String percentDisplay = (percent != null) ? percent + "%" : "N/A";
-            log.info(" - {}: {} ({} of {})", name, percentDisplay, level, max);
-        });
+        // Supplies (toner, etc.)
+        if (!printer.getSupplyLevels().isEmpty()) {
+            log.info("\n--- Supplies ---");
+            for (String supply : printer.getSupplyDescriptions().keySet()) {
+                Integer percentage = printer.getSupplyPercentage(supply);
+                String level = percentage != null ? percentage + "%" : "Unknown";
+                log.info("{}: {}", supply, level);
+            }
+        }
 
-        log.info("=======================");
+        // Paper trays
+        if (!printer.getTrayLevels().isEmpty()) {
+            log.info("\n--- Paper Trays ---");
+            for (String tray : printer.getTrayDescriptions().keySet()) {
+                Integer percentage = printer.getTrayPercentage(tray);
+                String level = percentage != null ? percentage + "%" : "Unknown";
+                log.info("{}: {}", tray, level);
+            }
+        }
+
+        log.info("=====================================\n");
     }
 }

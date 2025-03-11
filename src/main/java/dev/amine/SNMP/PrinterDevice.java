@@ -16,7 +16,7 @@ public class PrinterDevice {
     @Builder.Default private Map<String, Integer> supplyMaxLevels = new ConcurrentHashMap<>();
     @Builder.Default private Map<String, String> supplyDescriptions = new ConcurrentHashMap<>();
 
-    // New paper tray maps
+    // Paper tray maps
     @Builder.Default private Map<String, Integer> trayLevels = new ConcurrentHashMap<>();
     @Builder.Default private Map<String, Integer> trayMaxLevels = new ConcurrentHashMap<>();
     @Builder.Default private Map<String, String> trayDescriptions = new ConcurrentHashMap<>();
@@ -26,11 +26,12 @@ public class PrinterDevice {
     private String macAddress;
     private String modelName;
     private String serialNumber;
+    private String vendor;
 
     // Page counts
-    private long totalPageCount;
-    private long colorPageCount;
-    private long monoPageCount;
+    private Long totalPageCount;
+    private Long colorPageCount;
+    private Long monoPageCount;
 
     // Status
     private PrinterStatus status;
@@ -46,6 +47,24 @@ public class PrinterDevice {
         Integer current = trayLevels.get(trayName);
         Integer max = trayMaxLevels.get(trayName);
         if (current == null || max == null || max <= 0) return null;
-        return (int) ((double) current / max * 100);
+        if (current < 0) return 0; // Handle negative values that some printers might report
+        return (int) Math.min(100, (double) current / max * 100);
+    }
+
+    public boolean isLowToner() {
+        return supplyLevels.entrySet().stream()
+                .anyMatch(entry -> {
+                    String name = entry.getKey().toLowerCase();
+                    Integer percentage = getSupplyPercentage(entry.getKey());
+                    return name.contains("toner") && percentage != null && percentage <= 10;
+                });
+    }
+
+    public boolean isLowPaper() {
+        return trayLevels.entrySet().stream()
+                .anyMatch(entry -> {
+                    Integer percentage = getTrayPercentage(entry.getKey());
+                    return percentage != null && percentage <= 10;
+                });
     }
 }
