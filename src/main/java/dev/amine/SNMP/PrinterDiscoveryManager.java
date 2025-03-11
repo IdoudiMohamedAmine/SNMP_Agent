@@ -267,7 +267,7 @@ public class PrinterDiscoveryManager {
                 }
             }
         } catch (Exception e) {
-            log.debug("Toner info failed for {}: {}", device.getIpAddress(), e.getMessage());
+            log.debug("Error getting toner info for {}: {}", device.getIpAddress(), e.getMessage());
         }
     }
 
@@ -301,9 +301,8 @@ public class PrinterDiscoveryManager {
                     int level = vbs[1].getVariable().toInt();
                     int max = vbs[2].getVariable().toInt();
 
-                    // Some printers report -3 for empty tray
-                    // or other negative values for various conditions
-                    if (level < 0) level = 0;
+                    // Some printers report -2 for "unknown" - handle appropriately
+                    if (level < -1) level = 0;
                     if (max <= 0) max = 100; // Default to percentage if max is invalid
 
                     device.getTrayDescriptions().put(desc, desc);
@@ -314,18 +313,28 @@ public class PrinterDiscoveryManager {
                 }
             }
         } catch (Exception e) {
-            log.debug("Paper tray info failed for {}: {}", device.getIpAddress(), e.getMessage());
+            log.debug("Error getting paper tray info for {}: {}", device.getIpAddress(), e.getMessage());
         }
     }
 
-    private String formatMac(Variable macVar) {
-        if (macVar instanceof OctetString) {
-            byte[] bytes = ((OctetString) macVar).getValue();
-            if (bytes.length == 6) {
-                return String.format("%02X:%02X:%02X:%02X:%02X:%02X",
-                        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]);
+    private String formatMac(Variable variable) {
+        if (variable == null) return null;
+
+        try {
+            byte[] macBytes = variable.toString().getBytes();
+            StringBuilder macBuilder = new StringBuilder();
+
+            for (int i = 0; i < macBytes.length; i++) {
+                macBuilder.append(String.format("%02X", macBytes[i]));
+                if (i < macBytes.length - 1) {
+                    macBuilder.append(":");
+                }
             }
+
+            return macBuilder.toString();
+        } catch (Exception e) {
+            log.debug("Error formatting MAC address: {}", e.getMessage());
+            return variable.toString();
         }
-        return "Unknown";
     }
 }
