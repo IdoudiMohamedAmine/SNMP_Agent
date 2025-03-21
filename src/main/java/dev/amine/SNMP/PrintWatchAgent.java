@@ -9,6 +9,7 @@ import java.util.Scanner;
 public class PrintWatchAgent {
     public static void main(String[] args) {
         String subnet = args.length > 0 ? args[0] : "192.168.0";
+        DatabaseManager dbManager = new DatabaseManager();
         log.info("Starting network scan for printers on {}...", subnet);
 
         PrinterDiscoveryManager manager = new PrinterDiscoveryManager();
@@ -20,7 +21,23 @@ public class PrintWatchAgent {
         }
 
         log.info("\nDiscovered {} printer(s):", printers.size());
-        printers.forEach(PrintWatchAgent::printPrinterDetails);
+        printers.forEach(printer -> {
+            // Validate counters before insertion
+            boolean validCounters = dbManager.checkCounterIncrease(
+                    printer.getMacAddress(),
+                    printer.getTotalPageCount(),
+                    printer.getColorPageCount(),
+                    printer.getMonoPageCount()
+            );
+
+            if (validCounters) {
+                dbManager.insertPrinterData(printer);
+            } else {
+                log.warn("Invalid counters for {} - possible reset detected", printer.getMacAddress());
+            }
+
+            printPrinterDetails(printer);
+        });
 
         // Check for alerts
         checkForAlerts(printers);
@@ -29,6 +46,7 @@ public class PrintWatchAgent {
         interactiveMode(printers);
     }
 
+    // Rest of the class remains unchanged below this point
     private static void checkForAlerts(List<PrinterDevice> printers) {
         log.info("\n=== Alerts ===");
         boolean hasAlerts = false;

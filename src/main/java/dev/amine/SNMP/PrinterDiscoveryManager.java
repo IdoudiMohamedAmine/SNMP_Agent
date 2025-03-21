@@ -75,6 +75,7 @@ public class PrinterDiscoveryManager {
     }
 
     private void determineVendor(PrinterDevice device) {
+
         String modelName = device.getModelName();
         if (modelName != null) {
             modelName = modelName.toLowerCase();

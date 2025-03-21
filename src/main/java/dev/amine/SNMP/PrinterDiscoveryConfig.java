@@ -1,8 +1,12 @@
 package dev.amine.SNMP;
 
+import lombok.Getter;
+import lombok.Setter;
+
 import java.util.Map;
 import java.util.HashMap;
-
+@Getter
+@Setter
 public class PrinterDiscoveryConfig {
     // Basic system info - standard across most devices
     public static final String SYSTEM_NAME = "1.3.6.1.2.1.1.5.0";
