@@ -1,147 +1,203 @@
 package dev.amine.SNMP;
 
+import lombok.extern.slf4j.Slf4j;
 import java.sql.*;
 import java.util.Map;
-import java.util.Properties;
-import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class DatabaseManager {
-    private static final String DB_URL = "jdbc:mysql://196.179.82.171:3306/printer_monitor";
-    private static final String DB_USER = "your_username";
-    private static final String DB_PASSWORD = "your_password";
+    private static final String JDBC_URL = "jdbc:mysql://196.179.82.171:3306/printwatch?useSSL=false";
+    private static final String USER = "printwatch";
+    private static final String PASSWORD = "securepassword";
 
     static {
         try {
             Class.forName("com.mysql.cj.jdbc.Driver");
         } catch (ClassNotFoundException e) {
             log.error("MySQL JDBC Driver not found", e);
+            System.exit(1);
         }
     }
 
-    public Connection getConnection() throws SQLException {
-        Properties props = new Properties();
-        props.setProperty("user", DB_USER);
-        props.setProperty("password", DB_PASSWORD);
-        props.setProperty("sslMode", "DISABLED"); // Use SSL in production
-        return DriverManager.getConnection(DB_URL, props);
+    public static Connection getConnection() throws SQLException {
+        return DriverManager.getConnection(JDBC_URL, USER, PASSWORD);
     }
 
-    public void insertPrinterData(PrinterDevice printer) {
-        String printerSql = "INSERT INTO printers (mac_address, model_name, ip_address, serial_number, vendor) " +
+    public static void savePrinterData(PrinterDevice printer) {
+        String printerSql = "INSERT INTO printers (mac_address, model_name, vendor, serial_number, ip_address) " +
                 "VALUES (?, ?, ?, ?, ?) " +
                 "ON DUPLICATE KEY UPDATE " +
-                "ip_address = VALUES(ip_address), last_seen = NOW()";
+                "ip_address = VALUES(ip_address), last_seen = CURRENT_TIMESTAMP";
 
-        String statusSql = "INSERT INTO printer_status (printer_id, status) " +
-                "VALUES ((SELECT id FROM printers WHERE mac_address = ?), ?)";
-
-        String countersSql = "INSERT INTO printer_counters (printer_id, total_page_count, color_page_count, mono_page_count) " +
-                "VALUES ((SELECT id FROM printers WHERE mac_address = ?), ?, ?, ?)";
+        String countSql = "INSERT INTO printer_counts (printer_id, total_pages, color_pages, mono_pages) " +
+                "VALUES (?, ?, ?, ?)";
 
         try (Connection conn = getConnection();
-             PreparedStatement printerStmt = conn.prepareStatement(printerSql);
-             PreparedStatement statusStmt = conn.prepareStatement(statusSql);
-             PreparedStatement countersStmt = conn.prepareStatement(countersSql)) {
+             PreparedStatement printerStmt = conn.prepareStatement(printerSql, Statement.RETURN_GENERATED_KEYS);
+             PreparedStatement countStmt = conn.prepareStatement(countSql)) {
 
-            // Insert/Update printer basic info
+            // Save printer basic info
             printerStmt.setString(1, printer.getMacAddress());
             printerStmt.setString(2, printer.getModelName());
-            printerStmt.setString(3, printer.getIpAddress());
+            printerStmt.setString(3, printer.getVendor());
             printerStmt.setString(4, printer.getSerialNumber());
-            printerStmt.setString(5, printer.getVendor());
+            printerStmt.setString(5, printer.getIpAddress());
             printerStmt.executeUpdate();
 
-            // Insert status
-            statusStmt.setString(1, printer.getMacAddress());
-            statusStmt.setString(2, printer.getStatus().name());
-            statusStmt.executeUpdate();
+            // Get printer ID
+            ResultSet rs = printerStmt.getGeneratedKeys();
+            int printerId = -1;
+            if (rs.next()) {
+                printerId = rs.getInt(1);
+            }
 
-            // Insert counters
-            countersStmt.setString(1, printer.getMacAddress());
-            countersStmt.setLong(2, printer.getTotalPageCount());
-            countersStmt.setLong(3, printer.getColorPageCount());
-            countersStmt.setLong(4, printer.getMonoPageCount());
-            countersStmt.executeUpdate();
+            if (printerId == -1) {
+                // If no generated key, try to get existing ID
+                printerId = getPrinterId(conn, printer.getMacAddress(), printer.getModelName());
+            }
 
-            // Insert supplies
-            insertSupplies(conn, printer);
-            insertTrays(conn, printer);
+            // Save page counts
+            if (printerId != -1) {
+                countStmt.setInt(1, printerId);
+                setLongOrNull(countStmt, 2, printer.getTotalPageCount());
+                setLongOrNull(countStmt, 3, printer.getColorPageCount());
+                setLongOrNull(countStmt, 4, printer.getMonoPageCount());
+                countStmt.executeUpdate();
 
+                // Save supplies
+                saveSupplies(conn, printerId, printer);
+                saveTrays(conn, printerId, printer);
+                checkCounters(conn, printerId, printer);
+                saveAlerts(conn, printerId, printer);
+            }
         } catch (SQLException e) {
-            log.error("Database error", e);
+            log.error("Database error saving printer data: {}", e.getMessage());
         }
     }
 
-    private void insertSupplies(Connection conn, PrinterDevice printer) throws SQLException {
-        String sql = "INSERT INTO printer_supplies (printer_id, supply_name, current_level, max_level, percentage) " +
-                "VALUES ((SELECT id FROM printers WHERE mac_address = ?), ?, ?, ?, ?)";
+    private static int getPrinterId(Connection conn, String mac, String model) throws SQLException {
+        String sql = "SELECT id FROM printers WHERE mac_address = ? AND model_name = ?";
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setString(1, mac);
+            stmt.setString(2, model);
+            ResultSet rs = stmt.executeQuery();
+            return rs.next() ? rs.getInt(1) : -1;
+        }
+    }
+
+    private static void saveSupplies(Connection conn, int printerId, PrinterDevice printer) throws SQLException {
+        String sql = "INSERT INTO printer_supplies (printer_id, supply_name, current_level, max_level) " +
+                "VALUES (?, ?, ?, ?) " +
+                "ON DUPLICATE KEY UPDATE " +
+                "current_level = VALUES(current_level), max_level = VALUES(max_level), last_updated = CURRENT_TIMESTAMP";
 
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             for (Map.Entry<String, Integer> entry : printer.getSupplyLevels().entrySet()) {
                 String supplyName = entry.getKey();
                 Integer current = entry.getValue();
                 Integer max = printer.getSupplyMaxLevels().get(supplyName);
-                Integer percentage = printer.getSupplyPercentage(supplyName);
 
-                stmt.setString(1, printer.getMacAddress());
+                stmt.setInt(1, printerId);
                 stmt.setString(2, supplyName);
-                stmt.setInt(3, current);
-                stmt.setInt(4, max);
-                stmt.setInt(5, percentage);
+                setIntOrNull(stmt, 3, current);
+                setIntOrNull(stmt, 4, max);
                 stmt.addBatch();
             }
             stmt.executeBatch();
         }
     }
 
-    private void insertTrays(Connection conn, PrinterDevice printer) throws SQLException {
-        String sql = "INSERT INTO paper_trays (printer_id, tray_name, current_level, max_level, percentage) " +
-                "VALUES ((SELECT id FROM printers WHERE mac_address = ?), ?, ?, ?, ?)";
+    private static void saveTrays(Connection conn, int printerId, PrinterDevice printer) throws SQLException {
+        String sql = "INSERT INTO printer_trays (printer_id, tray_name, current_level, max_level) " +
+                "VALUES (?, ?, ?, ?) " +
+                "ON DUPLICATE KEY UPDATE " +
+                "current_level = VALUES(current_level), max_level = VALUES(max_level), last_updated = CURRENT_TIMESTAMP";
 
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             for (Map.Entry<String, Integer> entry : printer.getTrayLevels().entrySet()) {
                 String trayName = entry.getKey();
                 Integer current = entry.getValue();
                 Integer max = printer.getTrayMaxLevels().get(trayName);
-                Integer percentage = printer.getTrayPercentage(trayName);
 
-                stmt.setString(1, printer.getMacAddress());
+                stmt.setInt(1, printerId);
                 stmt.setString(2, trayName);
-                stmt.setInt(3, current);
-                stmt.setInt(4, max);
-                stmt.setInt(5, percentage);
+                setIntOrNull(stmt, 3, current);
+                setIntOrNull(stmt, 4, max);
                 stmt.addBatch();
             }
             stmt.executeBatch();
         }
     }
 
-    public boolean checkCounterIncrease(String macAddress, Long newTotal, Long newColor, Long newMono) {
-        String sql = "SELECT total_page_count, color_page_count, mono_page_count " +
-                "FROM printer_counters " +
-                "WHERE printer_id = (SELECT id FROM printers WHERE mac_address = ?) " +
+    private static void checkCounters(Connection conn, int printerId, PrinterDevice printer) throws SQLException {
+        String sql = "SELECT total_pages FROM printer_counts " +
+                "WHERE printer_id = ? " +
                 "ORDER BY timestamp DESC LIMIT 1";
 
-        try (Connection conn = getConnection();
-             PreparedStatement stmt = conn.prepareStatement(sql)) {
-
-            stmt.setString(1, macAddress);
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            stmt.setInt(1, printerId);
             ResultSet rs = stmt.executeQuery();
 
             if (rs.next()) {
-                Long oldTotal = rs.getLong("total_page_count");
-                Long oldColor = rs.getLong("color_page_count");
-                Long oldMono = rs.getLong("mono_page_count");
-
-                return newTotal >= oldTotal &&
-                        newColor >= oldColor &&
-                        newMono >= oldMono;
+                long lastTotal = rs.getLong("total_pages");
+                if (printer.getTotalPageCount() != null && printer.getTotalPageCount() < lastTotal) {
+                    log.warn("Counter rollback detected for printer {}! Current: {} Previous: {}",
+                            printerId, printer.getTotalPageCount(), lastTotal);
+                }
             }
-            return true; // No previous record
-        } catch (SQLException e) {
-            log.error("Counter validation failed", e);
-            return false;
+        }
+    }
+
+    private static void saveAlerts(Connection conn, int printerId, PrinterDevice printer) throws SQLException {
+        String sql = "INSERT INTO alerts (printer_id, alert_type, message) VALUES (?, ?, ?)";
+
+        try (PreparedStatement stmt = conn.prepareStatement(sql)) {
+            // Status alerts
+            if (printer.getStatus() == PrinterStatus.DOWN) {
+                stmt.setInt(1, printerId);
+                stmt.setString(2, "STATUS");
+                stmt.setString(3, "Printer is DOWN");
+                stmt.addBatch();
+            } else if (printer.getStatus() == PrinterStatus.WARNING) {
+                stmt.setInt(1, printerId);
+                stmt.setString(2, "STATUS");
+                stmt.setString(3, "Printer has WARNING status");
+                stmt.addBatch();
+            }
+
+            // Toner alerts
+            if (printer.isLowToner()) {
+                stmt.setInt(1, printerId);
+                stmt.setString(2, "TONER");
+                stmt.setString(3, "Low toner detected");
+                stmt.addBatch();
+            }
+
+            // Paper alerts
+            if (printer.isLowPaper()) {
+                stmt.setInt(1, printerId);
+                stmt.setString(2, "PAPER");
+                stmt.setString(3, "Low paper detected");
+                stmt.addBatch();
+            }
+
+            stmt.executeBatch();
+        }
+    }
+
+    private static void setLongOrNull(PreparedStatement stmt, int index, Long value) throws SQLException {
+        if (value != null) {
+            stmt.setLong(index, value);
+        } else {
+            stmt.setNull(index, Types.BIGINT);
+        }
+    }
+
+    private static void setIntOrNull(PreparedStatement stmt, int index, Integer value) throws SQLException {
+        if (value != null) {
+            stmt.setInt(index, value);
+        } else {
+            stmt.setNull(index, Types.INTEGER);
         }
     }
 }

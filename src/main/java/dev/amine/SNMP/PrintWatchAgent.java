@@ -2,220 +2,102 @@ package dev.amine.SNMP;
 
 import lombok.extern.slf4j.Slf4j;
 import java.util.List;
-import java.util.Map;
-import java.util.Scanner;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 public class PrintWatchAgent {
+    private static final int INITIAL_DELAY = 0;
+    private static final int SCAN_INTERVAL = 60; // minutes
+    private static final String SUBNET = "192.168.0"; // Change this to your subnet
+
     public static void main(String[] args) {
-        String subnet = args.length > 0 ? args[0] : "192.168.0";
-        DatabaseManager dbManager = new DatabaseManager();
-        log.info("Starting network scan for printers on {}...", subnet);
+        log.info("Starting PrintWatch Agent - Hourly Scanning Mode");
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
+        // Add shutdown hook for proper termination
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            log.info("Shutting down PrintWatch Agent...");
+            scheduler.shutdown();
+        }));
+
+        // Schedule hourly scans
+        scheduler.scheduleAtFixedRate(
+                PrintWatchAgent::scanAndProcess,
+                INITIAL_DELAY,
+                SCAN_INTERVAL,
+                TimeUnit.MINUTES
+        );
+
+        // Keep the main thread alive
+        try {
+            scheduler.awaitTermination(Long.MAX_VALUE, TimeUnit.DAYS);
+        } catch (InterruptedException e) {
+            log.error("Main thread interrupted", e);
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static void scanAndProcess() {
+        log.info("Starting scheduled printer scan...");
         PrinterDiscoveryManager manager = new PrinterDiscoveryManager();
-        List<PrinterDevice> printers = manager.discoverPrinters(subnet);
+        List<PrinterDevice> printers = manager.discoverPrinters(SUBNET);
+        processDiscoveredPrinters(printers);
+    }
 
+    private static void processDiscoveredPrinters(List<PrinterDevice> printers) {
         if (printers.isEmpty()) {
-            log.info("No printers found on the network.");
+            log.info("No printers found in this scan.");
             return;
         }
 
-        log.info("\nDiscovered {} printer(s):", printers.size());
+        log.info("Discovered {} printer(s) in this scan:", printers.size());
         printers.forEach(printer -> {
-            // Validate counters before insertion
-            boolean validCounters = dbManager.checkCounterIncrease(
-                    printer.getMacAddress(),
-                    printer.getTotalPageCount(),
-                    printer.getColorPageCount(),
-                    printer.getMonoPageCount()
-            );
-
-            if (validCounters) {
-                dbManager.insertPrinterData(printer);
-            } else {
-                log.warn("Invalid counters for {} - possible reset detected", printer.getMacAddress());
-            }
-
-            printPrinterDetails(printer);
+            logPrinterSummary(printer);
+            DatabaseManager.savePrinterData(printer);
         });
 
-        // Check for alerts
         checkForAlerts(printers);
-
-        // Interactive mode
-        interactiveMode(printers);
     }
 
-    // Rest of the class remains unchanged below this point
-    private static void checkForAlerts(List<PrinterDevice> printers) {
-        log.info("\n=== Alerts ===");
-        boolean hasAlerts = false;
+    private static void logPrinterSummary(PrinterDevice printer) {
+        log.info("Printer: {} ({}), Pages: {}, Status: {}",
+                printer.getModelName() != null ? printer.getModelName() : "Unknown",
+                printer.getIpAddress(),
+                printer.getTotalPageCount() != null ? printer.getTotalPageCount() : "N/A",
+                printer.getStatus());
+    }
 
-        for (PrinterDevice printer : printers) {
-            StringBuilder alerts = new StringBuilder();
+    private static void checkForAlerts(List<PrinterDevice> printers) {
+        printers.forEach(printer -> {
+            boolean hasAlert = false;
+            StringBuilder alertMessage = new StringBuilder();
 
             if (printer.getStatus() == PrinterStatus.DOWN) {
-                alerts.append("ALERT: Printer is DOWN\n");
-                hasAlerts = true;
+                alertMessage.append("Printer is DOWN. ");
+                hasAlert = true;
             } else if (printer.getStatus() == PrinterStatus.WARNING) {
-                alerts.append("ALERT: Printer has a WARNING status\n");
-                hasAlerts = true;
+                alertMessage.append("Printer has WARNING status. ");
+                hasAlert = true;
             }
 
             if (printer.isLowToner()) {
-                alerts.append("ALERT: Low toner detected\n");
-                hasAlerts = true;
+                alertMessage.append("Low toner detected. ");
+                hasAlert = true;
             }
 
             if (printer.isLowPaper()) {
-                alerts.append("ALERT: Low paper detected\n");
-                hasAlerts = true;
+                alertMessage.append("Low paper detected. ");
+                hasAlert = true;
             }
 
-            if (alerts.length() > 0) {
-                log.info("Printer: {} ({})", printer.getModelName() != null ? printer.getModelName() : "Unknown", printer.getIpAddress());
-                log.info(alerts.toString());
+            if (hasAlert) {
+                log.warn("ALERT - {} ({}): {}",
+                        printer.getModelName() != null ? printer.getModelName() : "Unknown",
+                        printer.getIpAddress(),
+                        alertMessage.toString().trim());
             }
-        }
-
-        if (!hasAlerts) {
-            log.info("No alerts detected. All printers operating normally.");
-        }
-    }
-
-    private static void interactiveMode(List<PrinterDevice> printers) {
-        Scanner scanner = new Scanner(System.in);
-        log.info("\nEnter a command (help, detail <index>, exit):");
-
-        String command = "";
-        while (!command.equalsIgnoreCase("exit")) {
-            System.out.print("> ");
-            command = scanner.nextLine();
-
-            if (command.equalsIgnoreCase("help")) {
-                log.info("Available commands:");
-                log.info("  list         - Lists all discovered printers");
-                log.info("  detail <num> - Shows detailed info for printer at index <num>");
-                log.info("  alerts       - Shows all printer alerts");
-                log.info("  rescan       - Rescans the network for printers");
-                log.info("  exit         - Exits the program");
-            } else if (command.equalsIgnoreCase("list")) {
-                for (int i = 0; i < printers.size(); i++) {
-                    PrinterDevice printer = printers.get(i);
-                    log.info("{}: {} ({}) - {}",
-                            i,
-                            printer.getModelName() != null ? printer.getModelName() : "Unknown Model",
-                            printer.getIpAddress(),
-                            printer.getStatus());
-                }
-            } else if (command.startsWith("detail ")) {
-                try {
-                    int index = Integer.parseInt(command.substring(7).trim());
-                    if (index >= 0 && index < printers.size()) {
-                        printPrinterDetails(printers.get(index));
-                    } else {
-                        log.info("Invalid printer index. Use 'list' to see available printers.");
-                    }
-                } catch (NumberFormatException e) {
-                    log.info("Invalid number format. Use 'detail <num>' with a valid number.");
-                }
-            } else if (command.equalsIgnoreCase("alerts")) {
-                checkForAlerts(printers);
-            } else if (command.equalsIgnoreCase("rescan")) {
-                log.info("Rescanning network...");
-                PrinterDiscoveryManager manager = new PrinterDiscoveryManager();
-                printers = manager.discoverPrinters("192.168.0");
-                log.info("Found {} printer(s)", printers.size());
-            } else if (!command.equalsIgnoreCase("exit")) {
-                log.info("Unknown command. Type 'help' for available commands.");
-            }
-        }
-
-        log.info("Exiting...");
-        scanner.close();
-    }
-
-    private static void printPrinterDetails(PrinterDevice printer) {
-        log.info("\n========== PRINTER DETAILS ==========");
-
-        // Basic Information Section
-        log.info("--- BASIC INFORMATION ---");
-        log.info("IP Address:     {}", printer.getIpAddress() != null ? printer.getIpAddress() : "Not Available");
-        log.info("MAC Address:    {}", printer.getMacAddress() != null ? printer.getMacAddress() : "Not Available");
-        log.info("Model:          {}", printer.getModelName() != null ? printer.getModelName() : "Not Available");
-        log.info("Serial Number:  {}", printer.getSerialNumber() != null ? printer.getSerialNumber() : "Not Available");
-        log.info("Vendor:         {}", printer.getVendor() != null ? printer.getVendor() : "Not Available");
-        log.info("Status:         {}", printer.getStatus() != null ? printer.getStatus() : "UNKNOWN");
-
-        // Page Counts Section
-        log.info("\n--- PAGE COUNTS ---");
-        log.info("Total Pages:    {}", printer.getTotalPageCount() != null ?
-                printer.getTotalPageCount().toString() : "Not Available");
-        log.info("Color Pages:    {}", printer.getColorPageCount() != null ?
-                printer.getColorPageCount().toString() : "Not Available");
-        log.info("Mono Pages:     {}", printer.getMonoPageCount() != null ?
-                printer.getMonoPageCount().toString() : "Not Available");
-
-        // Supplies Section (toner, ink, etc.)
-        if (!printer.getSupplyLevels().isEmpty()) {
-            log.info("\n--- SUPPLIES ---");
-            for (String supply : printer.getSupplyDescriptions().keySet()) {
-                Integer current = printer.getSupplyLevels().get(supply);
-                Integer max = printer.getSupplyMaxLevels().get(supply);
-                Integer percentage = printer.getSupplyPercentage(supply);
-
-                log.info("Supply:         {}", supply);
-                log.info("  - Level:      {}/{} units",
-                        current != null ? current : "N/A",
-                        max != null ? max : "N/A");
-                log.info("  - Percentage: {}%",
-                        percentage != null ? percentage : "Not Available");
-
-                // Add warning indicator for low supplies
-                if (percentage != null && percentage <= 10) {
-                    log.info("  - Status:     LOW - Replacement recommended");
-                } else if (percentage != null) {
-                    log.info("  - Status:     OK");
-                } else {
-                    log.info("  - Status:     Unknown");
-                }
-                log.info("------------------");
-            }
-        } else {
-            log.info("\n--- SUPPLIES ---");
-            log.info("No supply information available");
-        }
-
-        // Paper Trays Section
-        if (!printer.getTrayLevels().isEmpty()) {
-            log.info("\n--- PAPER TRAYS ---");
-            for (String tray : printer.getTrayDescriptions().keySet()) {
-                Integer current = printer.getTrayLevels().get(tray);
-                Integer max = printer.getTrayMaxLevels().get(tray);
-                Integer percentage = printer.getTrayPercentage(tray);
-
-                log.info("Tray:           {}", tray);
-                log.info("  - Level:      {}/{} sheets",
-                        current != null ? current : "N/A",
-                        max != null ? max : "N/A");
-                log.info("  - Percentage: {}%",
-                        percentage != null ? percentage : "Not Available");
-
-                // Add warning indicator for low paper
-                if (percentage != null && percentage <= 10) {
-                    log.info("  - Status:     LOW - Refill recommended");
-                } else if (percentage != null) {
-                    log.info("  - Status:     OK");
-                } else {
-                    log.info("  - Status:     Unknown");
-                }
-                log.info("------------------");
-            }
-        } else {
-            log.info("\n--- PAPER TRAYS ---");
-            log.info("No paper tray information available");
-        }
-
-        log.info("=====================================\n");
+        });
     }
 }
