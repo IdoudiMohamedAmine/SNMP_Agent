@@ -27,6 +27,8 @@ public class PrinterDevice {
     private String modelName;
     private String serialNumber;
     private String vendor;
+    private boolean colorPrinter;
+
 
     // Page counts
     private Long totalPageCount;
@@ -78,5 +80,8 @@ public class PrinterDevice {
     public boolean isColorPrinter() {
         return supplyDescriptions.values().stream()
                 .anyMatch(desc -> desc.toLowerCase().matches(".*\\b(cyan|magenta|yellow)\\b.*"));
+    }
+    public void setColorPrinter(boolean colorPrinter) {
+        this.colorPrinter = colorPrinter;
     }
 }

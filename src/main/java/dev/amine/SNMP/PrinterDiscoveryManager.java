@@ -69,18 +69,25 @@ public class PrinterDiscoveryManager {
     }
 
     private void determinePrinterType(PrinterDevice device) {
-        // Improved type detection
-        if (device.getModelName() == null || device.getModelName().equalsIgnoreCase("unknown")) {
-            device.setModelName("Generic Printer");
+        // Enhanced vendor detection
+        String model = device.getModelName().toLowerCase();
+
+        if (model.contains("versalink")) {
+            device.setVendor("Xerox");
+        } else if (model.contains("konica")) {
+            device.setVendor("Konica Minolta");
+        } else if (model.contains("hp") || model.contains("laserjet")) {
+            device.setVendor("HP");
+        } else if (model.contains("xerox")) {
+            device.setVendor("Xerox");
+        } else {
+            device.setVendor("Unknown");
         }
 
-        if (device.getVendor() == null) {
-            String model = device.getModelName().toLowerCase();
-            if (model.contains("hp")) device.setVendor("HP");
-            else if (model.contains("xerox")) device.setVendor("Xerox");
-            else if (model.contains("lexmark")) device.setVendor("Lexmark");
-            else device.setVendor("Unknown");
-        }
+        // Improved color detection
+        boolean hasColorSupplies = device.getSupplyDescriptions().values().stream()
+                .anyMatch(desc -> desc.toLowerCase().matches(".*\\b(cyan|magenta|yellow)\\b.*"));
+        device.setColorPrinter(hasColorSupplies);
     }
 
     private CommunityTarget createTarget(String ip, String community) {

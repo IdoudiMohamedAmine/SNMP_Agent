@@ -7,8 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class DatabaseManager {
-    private static final String JDBC_URL = "jdbc:postgresql://printwatch-5450.jxf.gcp-europe-west3.cockroachlabs.cloud:26257/defaultdb?sslmode=verify-full";
-    private static final String USER = "amine";
+    private static final String JDBC_URL = "jdbc:postgresql://printwatch-5450.jxf.gcp-europe-west3.cockroachlabs.cloud:26257/defaultdb?sslmode=require";    private static final String USER = "amine";
     private static final String PASSWORD = "XhFFQtOCKCg7jz5278rMCQ";
 
     static {

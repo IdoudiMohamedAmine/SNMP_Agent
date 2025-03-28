@@ -1,22 +1,20 @@
 package dev.amine.SNMP;
 
 import lombok.extern.slf4j.Slf4j;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Scanner;
-import java.util.UUID;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 @Slf4j
 public class PrintWatchAgent {
-    private static DatabaseManager dbManager = new DatabaseManager();
+    private static final DatabaseManager dbManager = new DatabaseManager();
+    private static PrinterDiscoveryManager discoveryManager = new PrinterDiscoveryManager();
 
     public static void main(String[] args) {
         String subnet = args.length > 0 ? args[0] : "192.168.0";
         log.info("Starting network scan for printers on {}...", subnet);
 
-        PrinterDiscoveryManager manager = new PrinterDiscoveryManager();
-        List<PrinterDevice> printers = manager.discoverPrinters(subnet);
+        List<PrinterDevice> printers = discoveryManager.discoverPrinters(subnet);
 
         if (printers.isEmpty()) {
             log.info("No printers found on the network.");
@@ -25,12 +23,16 @@ public class PrintWatchAgent {
 
         log.info("\nDiscovered {} printer(s):", printers.size());
         printers.forEach(printer -> {
-            UUID printerId = dbManager.upsertPrinter(printer);
-            if (printerId != null) {
-                dbManager.insertCounts(printerId, printer);
-                dbManager.upsertSupplies(printerId, printer);
-                dbManager.upsertTrays(printerId, printer);
-                dbManager.insertAlerts(printerId, getPrinterAlerts(printer));
+            try {
+                UUID printerId = dbManager.upsertPrinter(printer);
+                if (printerId != null) {
+                    dbManager.insertCounts(printerId, printer);
+                    dbManager.upsertSupplies(printerId, printer);
+                    dbManager.upsertTrays(printerId, printer);
+                    dbManager.insertAlerts(printerId, getPrinterAlerts(printer));
+                }
+            } catch (Exception e) {
+                log.warn("Database update failed for {}: {}", printer.getIpAddress(), e.getMessage());
             }
             printPrinterDetails(printer);
         });
@@ -55,125 +57,17 @@ public class PrintWatchAgent {
         return alerts;
     }
 
-    private static void checkForDatabaseAlerts() {
-        log.info("\n=== Current Database Alerts ===");
-        try {
-            List<String> activeAlerts = dbManager.getActiveAlerts();
-            if (activeAlerts.isEmpty()) {
-                log.info("No unresolved alerts in database");
-            } else {
-                activeAlerts.forEach(alert -> log.info(" - {}", alert));
-            }
-        } catch (Exception e) {
-            log.error("Error retrieving alerts: {}", e.getMessage());
-        }
-    }
-
-    // Rest of the class remains the same until interactiveMode
-
-    private static void interactiveMode(List<PrinterDevice> printers) {
-        Scanner scanner = new Scanner(System.in);
-        log.info("\nEnter a command (help, detail <index>, exit):");
-
-        while (true) {
-            System.out.print("> ");
-            String command = scanner.nextLine().trim();
-
-            if (command.equalsIgnoreCase("exit")) {
-                break;
-            }
-
-            handleCommand(command, printers);
-        }
-
-        log.info("Exiting...");
-        scanner.close();
-    }
-
-    private static void handleCommand(String command, List<PrinterDevice> printers) {
-        if (command.equalsIgnoreCase("help")) {
-            printHelp();
-        } else if (command.equalsIgnoreCase("list")) {
-            listPrinters(printers);
-        } else if (command.startsWith("detail ")) {
-            showDetail(command, printers);
-        } else if (command.equalsIgnoreCase("alerts")) {
-            checkForDatabaseAlerts();
-        } else if (command.equalsIgnoreCase("rescan")) {
-            rescanNetwork(printers);
-        } else {
-            log.info("Unknown command. Type 'help' for available commands.");
-        }
-    }
-
-    private static void printHelp() {
-        log.info("Available commands:");
-        log.info("  list         - Lists all discovered printers");
-        log.info("  detail <num> - Shows detailed info for printer at index <num>");
-        log.info("  alerts       - Shows all active alerts from database");
-        log.info("  rescan       - Rescans the network and updates database");
-        log.info("  exit         - Exits the program");
-    }
-
-    private static void listPrinters(List<PrinterDevice> printers) {
-        for (int i = 0; i < printers.size(); i++) {
-            PrinterDevice printer = printers.get(i);
-            log.info("{}: {} ({}) - {} - {}",
-                    i,
-                    printer.getModelName() != null ? printer.getModelName() : "Unknown Model",
-                    printer.getIpAddress(),
-                    printer.getStatus(),
-                    printer.isColorPrinter() ? "Color" : "Monochrome");
-        }
-    }
-
-    private static void showDetail(String command, List<PrinterDevice> printers) {
-        try {
-            int index = Integer.parseInt(command.substring(7).trim());
-            if (index >= 0 && index < printers.size()) {
-                PrinterDevice printer = printers.get(index);
-                printPrinterDetails(printer);
-                log.info("\n--- Historical Data ---");
-                dbManager.getHistoricalData(printer.getMacAddress(), printer.getModelName());
-            } else {
-                log.info("Invalid printer index. Use 'list' to see available printers.");
-            }
-        } catch (NumberFormatException e) {
-            log.info("Invalid number format. Use 'detail <num>' with a valid number.");
-        }
-    }
-
-    private static void rescanNetwork(List<PrinterDevice> printers) {
-        log.info("Rescanning network...");
-        PrinterDiscoveryManager manager = new PrinterDiscoveryManager();
-        List<PrinterDevice> newPrinters = manager.discoverPrinters("192.168.0");
-
-        newPrinters.forEach(printer -> {
-            UUID printerId = dbManager.upsertPrinter(printer);
-            if (printerId != null) {
-                dbManager.insertCounts(printerId, printer);
-                dbManager.upsertSupplies(printerId, printer);
-                dbManager.upsertTrays(printerId, printer);
-                dbManager.insertAlerts(printerId, getPrinterAlerts(printer));
-            }
-        });
-
-        printers.clear();
-        printers.addAll(newPrinters);
-        log.info("Rescan completed. Found {} printer(s)", printers.size());
-    }
-
-    // Rest of the utility methods remain unchanged
     private static void printPrinterDetails(PrinterDevice printer) {
         log.info("\n========== PRINTER DETAILS ==========");
         log.info("--- BASIC INFORMATION ---");
         log.info("IP Address:     {}", nullSafe(printer.getIpAddress()));
-        log.info("MAC Address:    {}", formatMacForDisplay(printer.getMacAddress()));
+        log.info("MAC Address:    {}", formatMac(printer.getMacAddress()));
         log.info("Model:          {}", nullSafe(printer.getModelName()));
         log.info("Vendor:         {}", nullSafe(printer.getVendor()));
         log.info("Serial:         {}", nullSafe(printer.getSerialNumber()));
         log.info("Type:           {}", printer.isColorPrinter() ? "Color" : "Monochrome");
         log.info("Status:         {}", printer.getStatus());
+
         logPageCounts(printer);
         logSupplies(printer);
         logTrays(printer);
@@ -227,20 +121,131 @@ public class PrintWatchAgent {
             log.info("No tray information available");
         }
     }
+
+    private static void checkForDatabaseAlerts() {
+        log.info("\n=== Current Database Alerts ===");
+        try {
+            List<String> activeAlerts = dbManager.getActiveAlerts();
+            if (activeAlerts.isEmpty()) {
+                log.info("No unresolved alerts in database");
+            } else {
+                activeAlerts.forEach(alert -> log.info(" - {}", alert));
+            }
+        } catch (Exception e) {
+            log.error("Error retrieving alerts: {}", e.getMessage());
+        }
+    }
+
+    private static void interactiveMode(List<PrinterDevice> printers) {
+        Scanner scanner = new Scanner(System.in);
+        log.info("\nEnter a command (help, detail <index>, exit):");
+
+        while (true) {
+            System.out.print("> ");
+            String command = scanner.nextLine().trim().toLowerCase();
+
+            if (command.equals("exit")) {
+                break;
+            }
+            handleCommand(command, printers, scanner);
+        }
+
+        log.info("Exiting...");
+        scanner.close();
+    }
+
+    private static void handleCommand(String command, List<PrinterDevice> printers, Scanner scanner) {
+        if (command.equals("help")) {
+            printHelp();
+        } else if (command.equals("list")) {
+            listPrinters(printers);
+        } else if (command.startsWith("detail")) {
+            handleDetailCommand(command, printers);
+        } else if (command.equals("alerts")) {
+            checkForDatabaseAlerts();
+        } else if (command.equals("rescan")) {
+            rescanNetwork(printers);
+        } else {
+            log.info("Unknown command. Type 'help' for available commands.");
+        }
+    }
+
+    private static void printHelp() {
+        log.info("Available commands:");
+        log.info("  list         - Lists all discovered printers");
+        log.info("  detail <num> - Shows detailed info for printer at index <num>");
+        log.info("  alerts       - Shows all active alerts from database");
+        log.info("  rescan       - Rescans the network and updates database");
+        log.info("  exit         - Exits the program");
+    }
+
+    private static void listPrinters(List<PrinterDevice> printers) {
+        for (int i = 0; i < printers.size(); i++) {
+            PrinterDevice printer = printers.get(i);
+            log.info("{}: {} ({}) - {} - {}",
+                    i,
+                    printer.getModelName(),
+                    printer.getIpAddress(),
+                    printer.getStatus(),
+                    printer.isColorPrinter() ? "Color" : "Monochrome");
+        }
+    }
+
+    private static void handleDetailCommand(String command, List<PrinterDevice> printers) {
+        try {
+            int index = Integer.parseInt(command.substring(6).trim());
+            if (index >= 0 && index < printers.size()) {
+                PrinterDevice printer = printers.get(index);
+                printPrinterDetails(printer);
+                log.info("\n--- Historical Data ---");
+                dbManager.getHistoricalData(printer.getMacAddress(), printer.getModelName());
+            } else {
+                log.info("Invalid printer index. Use 'list' to see available printers.");
+            }
+        } catch (NumberFormatException e) {
+            log.info("Invalid number format. Use 'detail <num>' with a valid number.");
+        }
+    }
+
+    private static void rescanNetwork(List<PrinterDevice> printers) {
+        log.info("Rescanning network...");
+        List<PrinterDevice> newPrinters = discoveryManager.discoverPrinters("192.168.0");
+
+        newPrinters.forEach(printer -> {
+            try {
+                UUID printerId = dbManager.upsertPrinter(printer);
+                if (printerId != null) {
+                    dbManager.insertCounts(printerId, printer);
+                    dbManager.upsertSupplies(printerId, printer);
+                    dbManager.upsertTrays(printerId, printer);
+                    dbManager.insertAlerts(printerId, getPrinterAlerts(printer));
+                }
+            } catch (Exception e) {
+                log.warn("Failed to update database for {}: {}", printer.getIpAddress(), e.getMessage());
+            }
+        });
+
+        printers.clear();
+        printers.addAll(newPrinters);
+        log.info("Rescan completed. Found {} printer(s)", printers.size());
+    }
+
+    // Utility methods
     private static String nullSafe(String value) {
         return value != null ? value : "Not Available";
     }
 
-    private static String formatMacForDisplay(String mac) {
-        if (mac == null) return "Not Available";
-        return mac.replaceAll("(.{2})(?!$)", "$1:");
-    }
     private static String nullSafeLong(Long value) {
         return value != null ? value.toString() : "Not Available";
     }
 
     private static String nullSafeInt(Integer value) {
         return value != null ? value.toString() : "N/A";
+    }
+
+    private static String formatMac(String mac) {
+        if (mac == null) return "Not Available";
+        return mac.replaceAll("(.{2})(?!$)", "$1:");
     }
 
     private static String getSupplyStatus(Integer percent) {
