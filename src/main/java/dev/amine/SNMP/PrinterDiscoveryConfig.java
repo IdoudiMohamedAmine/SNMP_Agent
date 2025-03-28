@@ -3,6 +3,9 @@ package dev.amine.SNMP;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * PrinterDiscoveryConfig updated based on RFC3805 (Printer MIB).
+ */
 public class PrinterDiscoveryConfig {
     public static final String SYSTEM_NAME = "1.3.6.1.2.1.1.5.0";
     public static final String SYSTEM_DESCRIPTION = "1.3.6.1.2.1.1.1.0";
@@ -24,14 +27,17 @@ public class PrinterDiscoveryConfig {
         Map<String, String> hpOids = new HashMap<>();
         hpOids.put("PRINTER_MODEL", "1.3.6.1.2.1.43.5.1.1.16.1");
         hpOids.put("COLOR_PAGE_COUNT", "1.3.6.1.4.1.11.2.3.9.4.2.1.4.1.2.6");
+        hpOids.put("MONO_PAGE_COUNT", "1.3.6.1.2.1.43.10.2.1.5.1.1");
         VENDOR_SPECIFIC_OIDS.put("HP", hpOids);
 
         Map<String, String> xeroxOids = new HashMap<>();
         xeroxOids.put("COLOR_PAGE_COUNT", "1.3.6.1.4.1.253.8.53.13.2.1.4.1.1.2");
+        xeroxOids.put("MONO_PAGE_COUNT", "1.3.6.1.2.1.43.10.2.1.5.1.1");
         VENDOR_SPECIFIC_OIDS.put("Xerox", xeroxOids);
 
         Map<String, String> genericOids = new HashMap<>();
         genericOids.put("PRINTER_MODEL", "1.3.6.1.2.1.43.5.1.1.16.1");
+        genericOids.put("MONO_PAGE_COUNT", "1.3.6.1.2.1.43.10.2.1.5.1.1");
         VENDOR_SPECIFIC_OIDS.put("Generic", genericOids);
     }
 

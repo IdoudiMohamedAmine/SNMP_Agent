@@ -11,6 +11,12 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
 
+/**
+ * PrinterDiscoveryManager updated based on RFC3805 (Printer MIB).
+ * Retrieves the printer model and vendor as defined in the standard.
+ * In case the printer model is not available (or is "Unknown"), both model and vendor
+ * are explicitly set to "Unknown" rather than defaulting to a random brand.
+ */
 @Slf4j
 public class PrinterDiscoveryManager {
     private final ExecutorService executor = Executors.newFixedThreadPool(50);
@@ -67,21 +73,29 @@ public class PrinterDiscoveryManager {
         return null;
     }
 
+    /**
+     * Determines the printer vendor based on the printer model.
+     * If the model name is not available or is "Unknown", both model and vendor
+     * are explicitly set to "Unknown".
+     */
     private void determineVendor(PrinterDevice device) {
-
         String modelName = device.getModelName();
-        if (modelName != null) {
-            modelName = modelName.toLowerCase();
+        if (modelName != null && !modelName.trim().isEmpty() && !modelName.equalsIgnoreCase("unknown")) {
+            boolean vendorFound = false;
             for (String vendor : PrinterDiscoveryConfig.getAllKnownVendors()) {
-                if (modelName.contains(vendor.toLowerCase())) {
+                if (modelName.toLowerCase().contains(vendor.toLowerCase())) {
                     device.setVendor(vendor);
-                    return;
+                    vendorFound = true;
+                    break;
                 }
             }
+            if (!vendorFound) {
+                device.setVendor("Unknown");
+            }
+        } else {
+            device.setModelName("Unknown");
+            device.setVendor("Unknown");
         }
-
-        // Default to generic if no vendor detected
-        device.setVendor("Generic");
     }
 
     private CommunityTarget createTarget(String ip, String community) {
@@ -120,22 +134,21 @@ public class PrinterDiscoveryManager {
             try {
                 if (oid.equals(PrinterDiscoveryConfig.SYSTEM_DESCRIPTION)) {
                     String sysDesc = variable.toString();
-                    // If system description contains "printer", it's likely a printer
                     if (sysDesc.toLowerCase().contains("printer")) {
                         isPrinter = true;
                     }
                 } else if (oid.equals(PrinterDiscoveryConfig.SERIAL_NUMBER)) {
                     device.setSerialNumber(variable.toString());
-                    isPrinter = true; // If it has a serial number in printer OID, it's likely a printer
+                    isPrinter = true;
                 } else if (oid.equals(PrinterDiscoveryConfig.MAC_ADDRESS)) {
                     device.setMacAddress(formatMac(variable));
                 } else if (oid.equals(PrinterDiscoveryConfig.TOTAL_PAGE_COUNT)) {
                     device.setTotalPageCount(Long.parseLong(variable.toString()));
-                    isPrinter = true; // If it has page count, it's definitely a printer
+                    isPrinter = true;
                 } else if (oid.equals(PrinterDiscoveryConfig.PRINTER_STATUS)) {
                     int statusValue = Integer.parseInt(variable.toString());
                     device.setStatus(PrinterStatus.fromStatusValue(statusValue));
-                    isPrinter = true; // If it has printer status, it's definitely a printer
+                    isPrinter = true;
                 }
             } catch (NumberFormatException e) {
                 log.debug("Error parsing numeric value for {}: {}", oid, variable.toString());
@@ -147,11 +160,13 @@ public class PrinterDiscoveryManager {
 
     private void getVendorSpecificInfo(Snmp snmp, CommunityTarget target, PrinterDevice device) {
         try {
-            // Get vendor
             String vendor = device.getVendor();
-            if (vendor == null) vendor = "Generic";
+            // Only perform vendor-specific queries if vendor is known
+            if (vendor == null || vendor.equals("Unknown")) {
+                return;
+            }
 
-            // Try model name first
+            // Try retrieving the printer model using vendor-specific OID
             String modelOid = PrinterDiscoveryConfig.getVendorSpecificOid(vendor, "PRINTER_MODEL");
             if (modelOid != null) {
                 Variable modelVar = getSnmpValue(snmp, target, modelOid);
@@ -186,14 +201,12 @@ public class PrinterDiscoveryManager {
                 }
             }
 
-            // If we don't have color and mono but we have total, estimate
+            // If color and mono counts are missing but total is available, estimate values
             if ((device.getColorPageCount() == null || device.getMonoPageCount() == null) &&
                     device.getTotalPageCount() != null) {
-                // Assume all mono if we couldn't get color count
                 if (device.getMonoPageCount() == null) {
                     device.setMonoPageCount(device.getTotalPageCount());
                 }
-                // Set color to 0 if we couldn't get it
                 if (device.getColorPageCount() == null) {
                     device.setColorPageCount(0L);
                 }
@@ -236,7 +249,6 @@ public class PrinterDiscoveryManager {
                 VariableBinding[] vbs = event.getColumns();
                 if (vbs.length < 3) continue;
 
-                // Skip if any values are "noSuchObject"
                 if (vbs[0].getVariable().toString().equals("noSuchObject") ||
                         vbs[1].getVariable().toString().equals("noSuchObject") ||
                         vbs[2].getVariable().toString().equals("noSuchObject")) {
@@ -250,9 +262,8 @@ public class PrinterDiscoveryManager {
                     int level = vbs[1].getVariable().toInt();
                     int max = vbs[2].getVariable().toInt();
 
-                    // Some printers report -2 for "unknown" - handle appropriately
                     if (level < 0) level = 0;
-                    if (max <= 0) max = 100; // Default to percentage if max is invalid
+                    if (max <= 0) max = 100;
 
                     device.getSupplyDescriptions().put(desc, desc);
                     device.getSupplyLevels().put(desc, level);
@@ -282,7 +293,6 @@ public class PrinterDiscoveryManager {
                 VariableBinding[] vbs = event.getColumns();
                 if (vbs.length < 3) continue;
 
-                // Skip if any values are "noSuchObject"
                 if (vbs[0].getVariable().toString().equals("noSuchObject") ||
                         vbs[1].getVariable().toString().equals("noSuchObject") ||
                         vbs[2].getVariable().toString().equals("noSuchObject")) {
@@ -296,9 +306,8 @@ public class PrinterDiscoveryManager {
                     int level = vbs[1].getVariable().toInt();
                     int max = vbs[2].getVariable().toInt();
 
-                    // Some printers report -2 for "unknown" - handle appropriately
                     if (level < -1) level = 0;
-                    if (max <= 0) max = 100; // Default to percentage if max is invalid
+                    if (max <= 0) max = 100;
 
                     device.getTrayDescriptions().put(desc, desc);
                     device.getTrayLevels().put(desc, level);
@@ -316,11 +325,9 @@ public class PrinterDiscoveryManager {
         if (variable == null) return null;
 
         try {
-            // MAC address should be an OctetString with raw bytes
             if (variable instanceof OctetString) {
                 byte[] macBytes = ((OctetString) variable).toByteArray();
 
-                // Typical MAC address has 6 bytes
                 if (macBytes.length == 6) {
                     return String.format("%02X:%02X:%02X:%02X:%02X:%02X",
                             macBytes[0] & 0xFF,
@@ -330,8 +337,6 @@ public class PrinterDiscoveryManager {
                             macBytes[4] & 0xFF,
                             macBytes[5] & 0xFF);
                 }
-                // Some devices might return longer byte arrays (include ASCII or other info)
-                // Try to extract last 6 bytes if possible
                 if (macBytes.length > 6) {
                     int start = macBytes.length - 6;
                     return String.format("%02X:%02X:%02X:%02X:%02X:%02X",
@@ -343,7 +348,6 @@ public class PrinterDiscoveryManager {
                             macBytes[start + 5] & 0xFF);
                 }
             }
-            // Fallback for unexpected formats
             return variable.toString();
         } catch (Exception e) {
             log.debug("Error formatting MAC address: {}", e.getMessage());
