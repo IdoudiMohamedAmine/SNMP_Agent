@@ -7,6 +7,7 @@ import org.snmp4j.smi.*;
 import org.snmp4j.transport.DefaultUdpTransportMapping;
 import org.snmp4j.util.*;
 import lombok.extern.slf4j.Slf4j;
+
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
@@ -139,6 +140,7 @@ public class PrinterDiscoveryManager {
         }
         return isPrinter;
     }
+
     private void getVendorSpecificInfo(Snmp snmp, CommunityTarget target, PrinterDevice device) {
         try {
             String vendor = device.getVendor();
@@ -308,22 +310,22 @@ public class PrinterDiscoveryManager {
         try {
             if (variable instanceof OctetString) {
                 byte[] macBytes = ((OctetString) variable).toByteArray();
-                if (macBytes.length < 6) return variable.toString();
+                if (macBytes.length < 6) return null;
 
                 // Extract last 6 bytes for MAC address
                 int start = macBytes.length - 6;
                 return String.format("%02X:%02X:%02X:%02X:%02X:%02X",
                         macBytes[start] & 0xFF,
-                        macBytes[start+1] & 0xFF,
-                        macBytes[start+2] & 0xFF,
-                        macBytes[start+3] & 0xFF,
-                        macBytes[start+4] & 0xFF,
-                        macBytes[start+5] & 0xFF);
+                        macBytes[start + 1] & 0xFF,
+                        macBytes[start + 2] & 0xFF,
+                        macBytes[start + 3] & 0xFF,
+                        macBytes[start + 4] & 0xFF,
+                        macBytes[start + 5] & 0xFF);
             }
             return variable.toString();
         } catch (Exception e) {
-            log.debug("Error formatting MAC address: {}", e.getMessage());
-            return variable.toString();
+            log.error("MAC format error: {}", e.getMessage());
+            return null;
         }
     }
 }

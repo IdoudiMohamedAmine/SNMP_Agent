@@ -24,11 +24,15 @@ public class DatabaseManager {
 
     public UUID upsertPrinter(PrinterDevice printer) {
         String sql = """
-        INSERT INTO printers (mac_address, model_name, vendor, serial_number, ip_address, is_color)
+        INSERT INTO printers (mac_address, serial_number, model_name, vendor, ip_address, is_color)
         VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT (mac_address, model_name) DO UPDATE SET
+        ON CONFLICT (serial_number) 
+        DO UPDATE SET
+            mac_address = EXCLUDED.mac_address,
+            model_name = EXCLUDED.model_name,
             vendor = EXCLUDED.vendor,
             ip_address = EXCLUDED.ip_address,
+            is_color = EXCLUDED.is_color,
             last_seen = now()
         RETURNING id
         """;
@@ -37,9 +41,9 @@ public class DatabaseManager {
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
 
             pstmt.setString(1, printer.getMacAddress());
-            pstmt.setString(2, printer.getModelName());
-            pstmt.setString(3, printer.getVendor());
-            pstmt.setString(4, printer.getSerialNumber());
+            pstmt.setString(2, printer.getSerialNumber());
+            pstmt.setString(3, printer.getModelName());
+            pstmt.setString(4, printer.getVendor());
             pstmt.setString(5, printer.getIpAddress());
             pstmt.setBoolean(6, printer.isColorPrinter());
 
@@ -52,7 +56,6 @@ public class DatabaseManager {
         }
         return null;
     }
-
     public void insertCounts(UUID printerId, PrinterDevice printer) {
         String checkSql = """
             SELECT total_pages, color_pages, mono_pages 
