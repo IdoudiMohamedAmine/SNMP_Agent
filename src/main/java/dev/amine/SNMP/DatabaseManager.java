@@ -24,14 +24,14 @@ public class DatabaseManager {
 
     public UUID upsertPrinter(PrinterDevice printer) {
         String sql = """
-            INSERT INTO printers (mac_address, model_name, vendor, serial_number, ip_address, is_color)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT (mac_address, model_name) DO UPDATE SET
-                vendor = EXCLUDED.vendor,
-                ip_address = EXCLUDED.ip_address,
-                last_seen = now()
-            RETURNING id
-            """;
+        INSERT INTO printers (mac_address, model_name, vendor, serial_number, ip_address, is_color)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT (mac_address, model_name) DO UPDATE SET
+            vendor = EXCLUDED.vendor,
+            ip_address = EXCLUDED.ip_address,
+            last_seen = now()
+        RETURNING id
+        """;
 
         try (Connection conn = getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {

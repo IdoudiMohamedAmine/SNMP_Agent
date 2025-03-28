@@ -308,26 +308,17 @@ public class PrinterDiscoveryManager {
         try {
             if (variable instanceof OctetString) {
                 byte[] macBytes = ((OctetString) variable).toByteArray();
+                if (macBytes.length < 6) return variable.toString();
 
-                if (macBytes.length == 6) {
-                    return String.format("%02X:%02X:%02X:%02X:%02X:%02X",
-                            macBytes[0] & 0xFF,
-                            macBytes[1] & 0xFF,
-                            macBytes[2] & 0xFF,
-                            macBytes[3] & 0xFF,
-                            macBytes[4] & 0xFF,
-                            macBytes[5] & 0xFF);
-                }
-                if (macBytes.length > 6) {
-                    int start = macBytes.length - 6;
-                    return String.format("%02X:%02X:%02X:%02X:%02X:%02X",
-                            macBytes[start] & 0xFF,
-                            macBytes[start + 1] & 0xFF,
-                            macBytes[start + 2] & 0xFF,
-                            macBytes[start + 3] & 0xFF,
-                            macBytes[start + 4] & 0xFF,
-                            macBytes[start + 5] & 0xFF);
-                }
+                // Extract last 6 bytes for MAC address
+                int start = macBytes.length - 6;
+                return String.format("%02X:%02X:%02X:%02X:%02X:%02X",
+                        macBytes[start] & 0xFF,
+                        macBytes[start+1] & 0xFF,
+                        macBytes[start+2] & 0xFF,
+                        macBytes[start+3] & 0xFF,
+                        macBytes[start+4] & 0xFF,
+                        macBytes[start+5] & 0xFF);
             }
             return variable.toString();
         } catch (Exception e) {
