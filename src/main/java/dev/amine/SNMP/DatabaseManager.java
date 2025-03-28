@@ -26,9 +26,8 @@ public class DatabaseManager {
         String sql = """
         INSERT INTO printers (mac_address, serial_number, model_name, vendor, ip_address, is_color)
         VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT (serial_number) 
+        ON CONFLICT (mac_address, serial_number) 
         DO UPDATE SET
-            mac_address = EXCLUDED.mac_address,
             model_name = EXCLUDED.model_name,
             vendor = EXCLUDED.vendor,
             ip_address = EXCLUDED.ip_address,
@@ -55,8 +54,7 @@ public class DatabaseManager {
             log.error("Error upserting printer", e);
         }
         return null;
-    }
-    public void insertCounts(UUID printerId, PrinterDevice printer) {
+    }    public void insertCounts(UUID printerId, PrinterDevice printer) {
         String checkSql = """
             SELECT total_pages, color_pages, mono_pages 
             FROM printer_counts 

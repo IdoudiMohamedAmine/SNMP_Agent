@@ -310,22 +310,22 @@ public class PrinterDiscoveryManager {
         try {
             if (variable instanceof OctetString) {
                 byte[] macBytes = ((OctetString) variable).toByteArray();
-                if (macBytes.length < 6) return null;
 
-                // Extract last 6 bytes for MAC address
-                int start = macBytes.length - 6;
+                // Handle MAC addresses longer than 6 bytes
+                if (macBytes.length < 6) return null;
+                int start = macBytes.length - 6; // Always take last 6 bytes
+
                 return String.format("%02X:%02X:%02X:%02X:%02X:%02X",
                         macBytes[start] & 0xFF,
-                        macBytes[start + 1] & 0xFF,
-                        macBytes[start + 2] & 0xFF,
-                        macBytes[start + 3] & 0xFF,
-                        macBytes[start + 4] & 0xFF,
-                        macBytes[start + 5] & 0xFF);
+                        macBytes[start+1] & 0xFF,
+                        macBytes[start+2] & 0xFF,
+                        macBytes[start+3] & 0xFF,
+                        macBytes[start+4] & 0xFF,
+                        macBytes[start+5] & 0xFF);
             }
             return variable.toString();
         } catch (Exception e) {
             log.error("MAC format error: {}", e.getMessage());
             return null;
         }
-    }
-}
+    }}
