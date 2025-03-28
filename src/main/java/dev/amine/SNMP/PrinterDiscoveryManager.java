@@ -11,12 +11,7 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
 
-/**
- * PrinterDiscoveryManager updated based on RFC3805 (Printer MIB).
- * Retrieves the printer model and vendor as defined in the standard.
- * In case the printer model is not available (or is "Unknown"), both model and vendor
- * are explicitly set to "Unknown" rather than defaulting to a random brand.
- */
+
 @Slf4j
 public class PrinterDiscoveryManager {
     private final ExecutorService executor = Executors.newFixedThreadPool(50);
@@ -60,10 +55,10 @@ public class PrinterDiscoveryManager {
 
                 CommunityTarget target = createTarget(ip, community);
                 if (getBasicInfo(snmp, target, device)) {
-                    determineVendor(device);
                     getVendorSpecificInfo(snmp, target, device);
                     getTonerInfo(snmp, target, device);
                     getPaperTrayInfo(snmp, target, device);
+                    determinePrinterType(device);
                     return device;
                 }
             }
@@ -73,28 +68,18 @@ public class PrinterDiscoveryManager {
         return null;
     }
 
-    /**
-     * Determines the printer vendor based on the printer model.
-     * If the model name is not available or is "Unknown", both model and vendor
-     * are explicitly set to "Unknown".
-     */
-    private void determineVendor(PrinterDevice device) {
-        String modelName = device.getModelName();
-        if (modelName != null && !modelName.trim().isEmpty() && !modelName.equalsIgnoreCase("unknown")) {
-            boolean vendorFound = false;
-            for (String vendor : PrinterDiscoveryConfig.getAllKnownVendors()) {
-                if (modelName.toLowerCase().contains(vendor.toLowerCase())) {
-                    device.setVendor(vendor);
-                    vendorFound = true;
-                    break;
-                }
-            }
-            if (!vendorFound) {
-                device.setVendor("Unknown");
-            }
-        } else {
-            device.setModelName("Unknown");
-            device.setVendor("Unknown");
+    private void determinePrinterType(PrinterDevice device) {
+        // Improved type detection
+        if (device.getModelName() == null || device.getModelName().equalsIgnoreCase("unknown")) {
+            device.setModelName("Generic Printer");
+        }
+
+        if (device.getVendor() == null) {
+            String model = device.getModelName().toLowerCase();
+            if (model.contains("hp")) device.setVendor("HP");
+            else if (model.contains("xerox")) device.setVendor("Xerox");
+            else if (model.contains("lexmark")) device.setVendor("Lexmark");
+            else device.setVendor("Unknown");
         }
     }
 
@@ -110,7 +95,7 @@ public class PrinterDiscoveryManager {
 
     private boolean getBasicInfo(Snmp snmp, CommunityTarget target, PrinterDevice device) throws IOException {
         PDU pdu = new PDU();
-        pdu.add(new VariableBinding(new OID(PrinterDiscoveryConfig.SYSTEM_DESCRIPTION)));
+        pdu.add(new VariableBinding(new OID(PrinterDiscoveryConfig.SYSTEM_NAME)));
         pdu.add(new VariableBinding(new OID(PrinterDiscoveryConfig.SERIAL_NUMBER)));
         pdu.add(new VariableBinding(new OID(PrinterDiscoveryConfig.MAC_ADDRESS)));
         pdu.add(new VariableBinding(new OID(PrinterDiscoveryConfig.TOTAL_PAGE_COUNT)));
@@ -126,20 +111,12 @@ public class PrinterDiscoveryManager {
             String oid = vb.getOid().toString();
             Variable variable = vb.getVariable();
 
-            // Skip "noSuchObject" responses
-            if (variable.toString().equals("noSuchObject")) {
-                continue;
-            }
-
             try {
-                if (oid.equals(PrinterDiscoveryConfig.SYSTEM_DESCRIPTION)) {
-                    String sysDesc = variable.toString();
-                    if (sysDesc.toLowerCase().contains("printer")) {
-                        isPrinter = true;
-                    }
+                if (oid.equals(PrinterDiscoveryConfig.SYSTEM_NAME)) {
+                    device.setModelName(variable.toString());
+                    isPrinter = true;
                 } else if (oid.equals(PrinterDiscoveryConfig.SERIAL_NUMBER)) {
                     device.setSerialNumber(variable.toString());
-                    isPrinter = true;
                 } else if (oid.equals(PrinterDiscoveryConfig.MAC_ADDRESS)) {
                     device.setMacAddress(formatMac(variable));
                 } else if (oid.equals(PrinterDiscoveryConfig.TOTAL_PAGE_COUNT)) {
@@ -148,16 +125,13 @@ public class PrinterDiscoveryManager {
                 } else if (oid.equals(PrinterDiscoveryConfig.PRINTER_STATUS)) {
                     int statusValue = Integer.parseInt(variable.toString());
                     device.setStatus(PrinterStatus.fromStatusValue(statusValue));
-                    isPrinter = true;
                 }
             } catch (NumberFormatException e) {
-                log.debug("Error parsing numeric value for {}: {}", oid, variable.toString());
+                log.debug("Error parsing value for {}: {}", oid, variable.toString());
             }
         }
-
         return isPrinter;
     }
-
     private void getVendorSpecificInfo(Snmp snmp, CommunityTarget target, PrinterDevice device) {
         try {
             String vendor = device.getVendor();

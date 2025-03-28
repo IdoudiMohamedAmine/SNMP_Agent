@@ -3,10 +3,9 @@ package dev.amine.SNMP;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * PrinterDiscoveryConfig updated based on RFC3805 (Printer MIB).
- */
 public class PrinterDiscoveryConfig {
+    // Added standard model OID
+    public static final String PRINTER_MODEL = "1.3.6.1.2.1.43.5.1.1.16.1";
     public static final String SYSTEM_NAME = "1.3.6.1.2.1.1.5.0";
     public static final String SYSTEM_DESCRIPTION = "1.3.6.1.2.1.1.1.0";
     public static final String MAC_ADDRESS = "1.3.6.1.2.1.2.2.1.6.1";
@@ -25,26 +24,21 @@ public class PrinterDiscoveryConfig {
 
     static {
         Map<String, String> hpOids = new HashMap<>();
-        hpOids.put("PRINTER_MODEL", "1.3.6.1.2.1.43.5.1.1.16.1");
         hpOids.put("COLOR_PAGE_COUNT", "1.3.6.1.4.1.11.2.3.9.4.2.1.4.1.2.6");
-        hpOids.put("MONO_PAGE_COUNT", "1.3.6.1.2.1.43.10.2.1.5.1.1");
         VENDOR_SPECIFIC_OIDS.put("HP", hpOids);
 
         Map<String, String> xeroxOids = new HashMap<>();
         xeroxOids.put("COLOR_PAGE_COUNT", "1.3.6.1.4.1.253.8.53.13.2.1.4.1.1.2");
-        xeroxOids.put("MONO_PAGE_COUNT", "1.3.6.1.2.1.43.10.2.1.5.1.1");
         VENDOR_SPECIFIC_OIDS.put("Xerox", xeroxOids);
 
         Map<String, String> genericOids = new HashMap<>();
-        genericOids.put("PRINTER_MODEL", "1.3.6.1.2.1.43.5.1.1.16.1");
         genericOids.put("MONO_PAGE_COUNT", "1.3.6.1.2.1.43.10.2.1.5.1.1");
         VENDOR_SPECIFIC_OIDS.put("Generic", genericOids);
     }
 
     public static String getVendorSpecificOid(String vendor, String oidKey) {
-        Map<String, String> vendorOids = VENDOR_SPECIFIC_OIDS.getOrDefault(vendor,
-                VENDOR_SPECIFIC_OIDS.get("Generic"));
-        return vendorOids.get(oidKey);
+        return VENDOR_SPECIFIC_OIDS.getOrDefault(vendor,
+                VENDOR_SPECIFIC_OIDS.get("Generic")).get(oidKey);
     }
 
     public static String[] getAllKnownVendors() {

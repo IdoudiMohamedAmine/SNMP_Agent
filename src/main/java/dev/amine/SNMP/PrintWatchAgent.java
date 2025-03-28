@@ -167,14 +167,13 @@ public class PrintWatchAgent {
     private static void printPrinterDetails(PrinterDevice printer) {
         log.info("\n========== PRINTER DETAILS ==========");
         log.info("--- BASIC INFORMATION ---");
-        log.info("IP Address:     {}", printer.getIpAddress() != null ? printer.getIpAddress() : "Not Available");
-        log.info("MAC Address:    {}", printer.getMacAddress() != null ? printer.getMacAddress() : "Not Available");
-        log.info("Model:          {}", printer.getModelName() != null ? printer.getModelName() : "Not Available");
-        log.info("Serial Number:  {}", printer.getSerialNumber() != null ? printer.getSerialNumber() : "Not Available");
-        log.info("Vendor:         {}", printer.getVendor() != null ? printer.getVendor() : "Not Available");
-        log.info("Type:           {}", printer.isColorPrinter() ? "Color Printer" : "Monochrome Printer");
-        log.info("Status:         {}", printer.getStatus() != null ? printer.getStatus() : "UNKNOWN");
-
+        log.info("IP Address:     {}", nullSafe(printer.getIpAddress()));
+        log.info("MAC Address:    {}", formatMacForDisplay(printer.getMacAddress()));
+        log.info("Model:          {}", nullSafe(printer.getModelName()));
+        log.info("Vendor:         {}", nullSafe(printer.getVendor()));
+        log.info("Serial:         {}", nullSafe(printer.getSerialNumber()));
+        log.info("Type:           {}", printer.isColorPrinter() ? "Color" : "Monochrome");
+        log.info("Status:         {}", printer.getStatus());
         logPageCounts(printer);
         logSupplies(printer);
         logTrays(printer);
@@ -228,7 +227,14 @@ public class PrintWatchAgent {
             log.info("No tray information available");
         }
     }
+    private static String nullSafe(String value) {
+        return value != null ? value : "Not Available";
+    }
 
+    private static String formatMacForDisplay(String mac) {
+        if (mac == null) return "Not Available";
+        return mac.replaceAll("(.{2})(?!$)", "$1:");
+    }
     private static String nullSafeLong(Long value) {
         return value != null ? value.toString() : "Not Available";
     }

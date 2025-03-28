@@ -36,6 +36,14 @@ public class PrinterDevice {
     // Status
     private PrinterStatus status;
 
+    public void setModelName(String modelName) {
+        if (modelName == null || modelName.isEmpty() ||
+                modelName.equals("noSuchObject") || modelName.equals("noSuchInstance")) {
+            this.modelName = "Unknown";
+        } else {
+            this.modelName = modelName;
+        }
+    }
     public Integer getSupplyPercentage(String supplyName) {
         Integer current = supplyLevels.get(supplyName);
         Integer max = supplyMaxLevels.get(supplyName);
