@@ -67,4 +67,8 @@ public class PrinterDevice {
                     return percentage != null && percentage <= 10;
                 });
     }
+    public boolean isColorPrinter() {
+        return supplyDescriptions.values().stream()
+                .anyMatch(desc -> desc.toLowerCase().matches(".*\\b(cyan|magenta|yellow)\\b.*"));
+    }
 }

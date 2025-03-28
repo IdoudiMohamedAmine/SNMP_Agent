@@ -7,7 +7,6 @@ import org.snmp4j.smi.*;
 import org.snmp4j.transport.DefaultUdpTransportMapping;
 import org.snmp4j.util.*;
 import lombok.extern.slf4j.Slf4j;
-
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
@@ -32,7 +31,7 @@ public class PrinterDiscoveryManager {
             Thread.currentThread().interrupt();
             return Collections.emptyList();
         } finally {
-            executor.shutdown(); // Ensure executor is shut down when done
+            executor.shutdown();
         }
     }
 
@@ -55,21 +54,15 @@ public class PrinterDiscoveryManager {
 
                 CommunityTarget target = createTarget(ip, community);
                 if (getBasicInfo(snmp, target, device)) {
-                    // Try to determine vendor from model or system description
                     determineVendor(device);
-
-                    // Get vendor-specific data
                     getVendorSpecificInfo(snmp, target, device);
-
-                    // Get consumables and tray info
                     getTonerInfo(snmp, target, device);
                     getPaperTrayInfo(snmp, target, device);
-
                     return device;
                 }
             }
         } catch (IOException e) {
-            log.debug("Error scanning {}: {}", ip, e.getMessage());
+            log.debug("Scan error {}: {}", ip, e.getMessage());
         }
         return null;
     }
