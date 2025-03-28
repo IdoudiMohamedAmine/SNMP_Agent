@@ -54,52 +54,28 @@ public class DatabaseManager {
             log.error("Error upserting printer", e);
         }
         return null;
-    }    public void insertCounts(UUID printerId, PrinterDevice printer) {
-        String checkSql = """
-            SELECT total_pages, color_pages, mono_pages 
-            FROM printer_counts 
-            WHERE printer_id = ? 
-            ORDER BY timestamp DESC 
-            LIMIT 1
-            """;
-
+    }
+    public void insertCounts(UUID printerId, PrinterDevice printer) {
         String insertSql = """
-            INSERT INTO printer_counts (printer_id, total_pages, color_pages, mono_pages)
-            VALUES (?, ?, ?, ?)
-            """;
+        INSERT INTO printer_counts (printer_id, total_pages, color_pages, mono_pages)
+        VALUES (?, ?, ?, ?)
+        """;
 
         try (Connection conn = getConnection();
-             PreparedStatement checkStmt = conn.prepareStatement(checkSql);
              PreparedStatement insertStmt = conn.prepareStatement(insertSql)) {
 
-            // Check previous counts
-            checkStmt.setObject(1, printerId);
-            ResultSet rs = checkStmt.executeQuery();
-
-            if (rs.next()) {
-                long prevTotal = rs.getLong("total_pages");
-                long prevColor = rs.getLong("color_pages");
-                long prevMono = rs.getLong("mono_pages");
-
-                if (printer.getTotalPageCount() < prevTotal ||
-                        printer.getColorPageCount() < prevColor ||
-                        printer.getMonoPageCount() < prevMono) {
-                    log.warn("Page counts decreased for printer {} - possible counter reset", printerId);
-                }
-            }
-
-            // Insert new counts
+            // Use total count directly, default others to 0
             insertStmt.setObject(1, printerId);
             insertStmt.setLong(2, printer.getTotalPageCount());
-            insertStmt.setLong(3, printer.getColorPageCount());
-            insertStmt.setLong(4, printer.getMonoPageCount());
+            insertStmt.setLong(3, printer.getColorPageCount() != null ? printer.getColorPageCount() : 0);
+            insertStmt.setLong(4, printer.getMonoPageCount() != null ? printer.getMonoPageCount() : 0);
+
             insertStmt.executeUpdate();
 
         } catch (SQLException e) {
             log.error("Error inserting counts", e);
         }
     }
-
     public void upsertSupplies(UUID printerId, PrinterDevice printer) {
         String sql = """
             INSERT INTO printer_supplies (printer_id, supply_name, current_level, max_level)

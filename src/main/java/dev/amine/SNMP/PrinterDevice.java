@@ -32,8 +32,8 @@ public class PrinterDevice {
 
     // Page counts
     private Long totalPageCount;
-    private Long colorPageCount;
-    private Long monoPageCount;
+    private Long colorPageCount = 0L; // Default to 0
+    private Long monoPageCount = 0L;
 
     // Status
     private PrinterStatus status;
@@ -76,6 +76,13 @@ public class PrinterDevice {
                     Integer percentage = getTrayPercentage(entry.getKey());
                     return percentage != null && percentage <= 10;
                 });
+    }
+    public Long getColorPageCount() {
+        return colorPageCount != null ? colorPageCount : 0L;
+    }
+
+    public Long getMonoPageCount() {
+        return monoPageCount != null ? monoPageCount : 0L;
     }
     public boolean isColorPrinter() {
         return supplyDescriptions.values().stream()
