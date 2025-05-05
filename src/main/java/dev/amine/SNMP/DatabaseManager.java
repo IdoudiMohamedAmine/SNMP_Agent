@@ -64,8 +64,7 @@ public class DatabaseManager {
         try (Connection conn = getConnection();
              PreparedStatement insertStmt = conn.prepareStatement(insertSql)) {
 
-            // Use total count directly, default others to 0
-            insertStmt.setObject(1, printerId);
+            // Use total count directly, default others to 0             insertStmt.setObject(1, printerId);
             insertStmt.setLong(2, printer.getTotalPageCount());
             insertStmt.setLong(3, printer.getColorPageCount() != null ? printer.getColorPageCount() : 0);
             insertStmt.setLong(4, printer.getMonoPageCount() != null ? printer.getMonoPageCount() : 0);
