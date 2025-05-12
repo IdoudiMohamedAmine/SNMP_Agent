@@ -18,6 +18,7 @@ public class PrinterDiscoveryConfig {
     public static final String PAPER_TRAY_DESCRIPTION = "1.3.6.1.2.1.43.8.2.1.18";
     public static final String PAPER_TRAY_LEVELS = "1.3.6.1.2.1.43.8.2.1.10";
     public static final String PAPER_TRAY_MAX_LEVELS = "1.3.6.1.2.1.43.8.2.1.9";
+    public static final String MEDIA_SIZE_SUPPORTED = "1.3.6.1.2.1.43.13.4.1.8"; // prtInputMediaName
     public static final String[] COMMUNITY = {"public", "private"};
 
     private static final Map<String, Map<String, String>> VENDOR_SPECIFIC_OIDS = new HashMap<>();

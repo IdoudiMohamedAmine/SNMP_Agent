@@ -60,6 +60,7 @@ public class PrinterDiscoveryManager {
                     getTonerInfo(snmp, target, device);
                     getPaperTrayInfo(snmp, target, device);
                     determinePrinterType(device);
+                    getMediaSizes(snmp, target, device);
                     return device;
                 }
             }
@@ -310,22 +311,61 @@ public class PrinterDiscoveryManager {
         try {
             if (variable instanceof OctetString) {
                 byte[] macBytes = ((OctetString) variable).toByteArray();
-
-                // Handle MAC addresses longer than 6 bytes
                 if (macBytes.length < 6) return null;
                 int start = macBytes.length - 6; // Always take last 6 bytes
-
                 return String.format("%02X:%02X:%02X:%02X:%02X:%02X",
                         macBytes[start] & 0xFF,
-                        macBytes[start+1] & 0xFF,
-                        macBytes[start+2] & 0xFF,
-                        macBytes[start+3] & 0xFF,
-                        macBytes[start+4] & 0xFF,
-                        macBytes[start+5] & 0xFF);
+                        macBytes[start + 1] & 0xFF,
+                        macBytes[start + 2] & 0xFF,
+                        macBytes[start + 3] & 0xFF,
+                        macBytes[start + 4] & 0xFF,
+                        macBytes[start + 5] & 0xFF);
             }
             return variable.toString();
         } catch (Exception e) {
             log.error("MAC format error: {}", e.getMessage());
             return null;
         }
-    }}
+    }
+    private void getMediaSizes(Snmp snmp, CommunityTarget target, PrinterDevice device) {
+        try {
+            TableUtils utils = new TableUtils(snmp, new DefaultPDUFactory());
+            OID[] columns = {
+                    new OID(PrinterDiscoveryConfig.MEDIA_SIZE_SUPPORTED)
+            };
+
+            List<TableEvent> events = utils.getTable(target, columns, null, null);
+            for (TableEvent event : events) {
+                if (event.isError()) continue;
+
+                VariableBinding[] vbs = event.getColumns();
+                if (vbs.length < 1) continue;
+
+                if (vbs[0].getVariable().toString().equals("noSuchObject")) {
+                    continue;
+                }
+
+                String mediaSize = vbs[0].getVariable().toString().trim();
+                if (!mediaSize.isEmpty()) {
+                    device.getSupportedMediaSizes().add(mediaSize);
+                }
+            }
+
+            // If we couldn't get supported media sizes through SNMP,
+            // check the tray names as a fallback
+            if (device.getSupportedMediaSizes().isEmpty()) {
+                device.getTrayDescriptions().forEach((name, desc) -> {
+                    String trayInfo = (name + " " + desc).toLowerCase();
+                    if (trayInfo.contains("a3")) {
+                        device.getSupportedMediaSizes().add("a3");
+                    }
+                    if (trayInfo.contains("a4")) {
+                        device.getSupportedMediaSizes().add("a4");
+                    }
+                });
+            }
+        } catch (Exception e) {
+            log.debug("Error getting media sizes for {}: {}", device.getIpAddress(), e.getMessage());
+        }
+    }
+}

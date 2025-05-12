@@ -1,7 +1,10 @@
 package dev.amine.SNMP;
 
 import lombok.*;
+
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Getter
@@ -20,6 +23,7 @@ public class PrinterDevice {
     @Builder.Default private Map<String, Integer> trayLevels = new ConcurrentHashMap<>();
     @Builder.Default private Map<String, Integer> trayMaxLevels = new ConcurrentHashMap<>();
     @Builder.Default private Map<String, String> trayDescriptions = new ConcurrentHashMap<>();
+    @Builder.Default private Set<String> supportedMediaSizes= new HashSet<>() ;
 
     // Basic info
     private String ipAddress;
@@ -90,5 +94,13 @@ public class PrinterDevice {
     }
     public void setColorPrinter(boolean colorPrinter) {
         this.colorPrinter = colorPrinter;
+    }
+    public boolean canPrintA3(){
+        return supportedMediaSizes.stream()
+                .anyMatch(size -> size.toLowerCase().contains("a3"));
+    }
+    public boolean canPrintA4(){
+        return supportedMediaSizes.stream()
+                .anyMatch(size -> size.toLowerCase().contains("a4"));
     }
 }
