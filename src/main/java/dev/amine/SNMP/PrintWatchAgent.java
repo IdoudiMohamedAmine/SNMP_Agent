@@ -24,8 +24,15 @@ public class PrintWatchAgent {
         }
         log.info("Starting network scan for printers on {}...", subnet);
         final String fiinalSubnet = subnet;
-        scheduler.scheduleAtFixedRate(() -> ScanAndProcessPrinters(fiinalSubnet), 0, 6, TimeUnit.HOURS);
+        scheduler.scheduleAtFixedRate(() -> {
+                try{
+                    ScanAndProcessPrinters(fiinalSubnet);
+                }catch(Exception e){
+                    log.error("Error during scheduled scan: {}", e.getMessage(), e);
+                }
+        }, 0, 6, TimeUnit.HOURS);
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            discoveryManager.shutDown();
             log.info("Shutting down PrintWatchAgent...");
             scheduler.shutdown();
             try {

@@ -80,31 +80,99 @@
                 </executions>
             </plugin>
             <plugin>
+                <groupId>org.codehaus.izpack</groupId>
+                <artifactId>izpack-maven-plugin</artifactId>
+                <version>5.1.3</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>izpack</goal>
+                        </goals>
+                        <configuration>
+                            <installFile>src/main/izpack/install.xml</installFile>
+                            <baseDir>${project.build.directory}</baseDir>
+                            <finalName>printwatch-installer</finalName>
+                        </configuration>
+                    </execution>
+                </executions>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.codehaus.izpack</groupId>
+                        <artifactId>izpack-panel</artifactId>
+                        <version>5.1.3</version>
+                    </dependency>
+                </dependencies>
+            </plugin>
+            <plugin>
                 <groupId>org.panteleyev</groupId>
                 <artifactId>jpackage-maven-plugin</artifactId>
                 <version>1.6.0</version>
                 <configuration>
-                    <name>SNMP Agent</name>
+                    <name>Printwatch</name>
                     <appVersion>${project.version}</appVersion>
                     <vendor>Your Company</vendor>
                     <input>${project.build.directory}</input>
                     <destination>${project.build.directory}/dist</destination>
                     <mainJar>${project.artifactId}-${project.version}-jar-with-dependencies.jar</mainJar>
                     <mainClass>dev.amine.SNMP.PrintWatchAgent</mainClass>
-                    <!-- Create wizard-based installers -->
+
+                    <!-- Windows options -->
                     <winMenu>true</winMenu>
-                    <winDirChooser>true</winDirChooser>
                     <winShortcut>true</winShortcut>
+                    <winPerUserInstall>false</winPerUserInstall>
+                    <winDirChooser>true</winDirChooser>
+                    <winUpgradeUuid>2e99fdd3-18b6-4fdf-b217-42e73c2b48e9</winUpgradeUuid>
+
+                    <!-- Linux options -->
+                    <linuxPackageName>printwatch</linuxPackageName>
+                    <linuxAppCategory>Utilities</linuxAppCategory>
                     <linuxShortcut>true</linuxShortcut>
-                    <macPackageName>printwatch</macPackageName>
+                    <linuxMenuGroup>System</linuxMenuGroup>
+                    <linuxRpmLicenseType>MIT</linuxRpmLicenseType>
+
+                    <!-- Mac options -->
+                    <macPackageName>Printwatch</macPackageName>
+                    <macPackageIdentifier>com.abcsolpro.snmpagent</macPackageIdentifier>
+                    <macPackageSigningPrefix>com.abcsolpro.snmpagent</macPackageSigningPrefix>
+
+                    <!-- Java options -->
+                    <javaOptions>
+                        <javaOption>--no-jre-provision</javaOption>
+                    </javaOptions>
                 </configuration>
                 <executions>
                     <execution>
-                        <id>package</id>
+                        <id>win-msi</id>
                         <phase>package</phase>
                         <goals>
                             <goal>jpackage</goal>
                         </goals>
+                        <configuration>
+                            <type>msi</type>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>linux-deb</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jpackage</goal>
+                        </goals>
+                        <configuration>
+                            <type>deb</type>
+                            <linuxShortcut>true</linuxShortcut>
+                            <linuxPackageName>printwatch</linuxPackageName>
+                            <!-- Add post-install script for auto-starting service -->
+                            <arguments>
+                                <argument>--linux-shortcut</argument>
+                                <argument>--linux-package-name</argument>
+                                <argument>printwatch</argument>
+                                <argument>--linux-deb-maintainer</argument>
+                                <argument>your@email.com</argument>
+                                <argument>--linux-post-install-script</argument>
+                                <argument>${project.basedir}/src/main/java/dev/amine/SNMP/installerResources/linux/postinstall.sh</argument>
+                            </arguments>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>

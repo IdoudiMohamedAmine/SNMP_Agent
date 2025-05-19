@@ -15,7 +15,9 @@ import java.util.concurrent.*;
 
 @Slf4j
 public class PrinterDiscoveryManager {
-    private final ExecutorService executor = Executors.newFixedThreadPool(50);
+    private static final ExecutorService executor = Executors.newFixedThreadPool(50);
+
+    private static boolean isShutdown=false;
 
     public List<PrinterDevice> discoverPrinters(String subnet) {
         List<Callable<PrinterDevice>> tasks = new ArrayList<>();
@@ -32,8 +34,21 @@ public class PrinterDiscoveryManager {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return Collections.emptyList();
-        } finally {
-            executor.shutdown();
+        } catch(RejectedExecutionException e){
+            log.error("task rejected , executor is shutdown :{}",e.getMessage());
+            return Collections.emptyList();
+        }
+    }
+    public static void shutDown(){
+        isShutdown=true;
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(60, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
         }
     }
 
