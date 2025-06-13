@@ -127,13 +127,10 @@ public class DatabaseManager {
     }
 
     public void insertCounts(UUID printerId, PrinterDevice printer) {
+        // Always insert new count record for historical tracking - no duplicate prevention
         String sql = """
         INSERT INTO COUNTS (printer_id, time_of_update, total_prints)
         VALUES (?, CURRENT_TIMESTAMP, ?)
-        ON CONFLICT (printer_id) 
-        DO UPDATE SET 
-            time_of_update = CURRENT_TIMESTAMP,
-            total_prints = EXCLUDED.total_prints
         """;
 
         try (Connection conn = getConnection();
@@ -143,10 +140,11 @@ public class DatabaseManager {
             pstmt.setLong(2, printer.getTotalPageCount() != null ? printer.getTotalPageCount() : 0L);
 
             int rowsAffected = pstmt.executeUpdate();
-            log.debug("Upserted counts for printer {}: {} rows affected", printerId, rowsAffected);
+            log.debug("Archived new count record for printer {}: {} total prints", printerId,
+                    printer.getTotalPageCount() != null ? printer.getTotalPageCount() : 0L);
 
         } catch (SQLException e) {
-            log.error("Error upserting counts for printer {}: {}", printerId, e.getMessage(), e);
+            log.error("Error archiving counts for printer {}: {}", printerId, e.getMessage(), e);
         }
     }
 
@@ -283,6 +281,13 @@ public class DatabaseManager {
         String sql;
 
         switch (tableType.toUpperCase()) {
+            case "COUNTS":
+                sql = """
+                SELECT COUNT(*) FROM COUNTS 
+                WHERE printer_id = ? 
+                AND time_of_update >= CURRENT_TIMESTAMP - INTERVAL '%d minutes'
+                """.formatted(minutesThreshold);
+                break;
             case "COMPONENTS":
                 sql = """
                 SELECT COUNT(*) FROM COMPONENTS 
@@ -387,17 +392,52 @@ public class DatabaseManager {
     public Map<String, Object> getPrinterStats(UUID printerId) {
         Map<String, Object> stats = new HashMap<>();
 
-        // Get current counts (only one record per printer now)
-        String countsSql = "SELECT total_prints, time_of_update FROM COUNTS WHERE printer_id = ?";
+        // Get latest count (most recent reading)
+        String countsSql = """
+        SELECT total_prints, time_of_update 
+        FROM COUNTS 
+        WHERE printer_id = ? 
+        ORDER BY time_of_update DESC 
+        LIMIT 1
+        """;
 
         try (Connection conn = getConnection()) {
-            // Get counts
+            // Get latest count
             try (PreparedStatement pstmt = conn.prepareStatement(countsSql)) {
                 pstmt.setObject(1, printerId);
                 ResultSet rs = pstmt.executeQuery();
                 if (rs.next()) {
                     stats.put("total_prints", rs.getLong("total_prints"));
                     stats.put("last_count_update", rs.getTimestamp("time_of_update"));
+                }
+            }
+
+            // Get count of historical records
+            String countHistorySql = "SELECT COUNT(*) as count_records FROM COUNTS WHERE printer_id = ?";
+            try (PreparedStatement pstmt = conn.prepareStatement(countHistorySql)) {
+                pstmt.setObject(1, printerId);
+                ResultSet rs = pstmt.executeQuery();
+                if (rs.next()) {
+                    stats.put("total_count_records", rs.getInt("count_records"));
+                }
+            }
+
+            // Calculate pages printed in last 24 hours
+            String dailyPagesSql = """
+            SELECT 
+                MAX(total_prints) - MIN(total_prints) as pages_last_24h
+            FROM COUNTS 
+            WHERE printer_id = ? 
+            AND time_of_update >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
+            """;
+            try (PreparedStatement pstmt = conn.prepareStatement(dailyPagesSql)) {
+                pstmt.setObject(1, printerId);
+                ResultSet rs = pstmt.executeQuery();
+                if (rs.next()) {
+                    long dailyPages = rs.getLong("pages_last_24h");
+                    if (!rs.wasNull()) {
+                        stats.put("pages_last_24h", dailyPages);
+                    }
                 }
             }
 
@@ -447,12 +487,18 @@ public class DatabaseManager {
     }
 
     /**
-     * Get current count information for a printer
+     * Get the latest count information for a printer
      */
     public Map<String, Object> getCurrentCount(UUID printerId) {
         Map<String, Object> countInfo = new HashMap<>();
 
-        String sql = "SELECT total_prints, time_of_update FROM COUNTS WHERE printer_id = ?";
+        String sql = """
+        SELECT total_prints, time_of_update 
+        FROM COUNTS 
+        WHERE printer_id = ? 
+        ORDER BY time_of_update DESC 
+        LIMIT 1
+        """;
 
         try (Connection conn = getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
@@ -470,6 +516,75 @@ public class DatabaseManager {
         }
 
         return countInfo;
+    }
+
+    /**
+     * Get count history for a printer within a specified time range
+     */
+    public List<Map<String, Object>> getCountHistory(UUID printerId, int daysBack) {
+        List<Map<String, Object>> history = new ArrayList<>();
+
+        String sql = """
+        SELECT total_prints, time_of_update 
+        FROM COUNTS 
+        WHERE printer_id = ? 
+        AND time_of_update >= CURRENT_TIMESTAMP - INTERVAL '%d days'
+        ORDER BY time_of_update ASC
+        """.formatted(daysBack);
+
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setObject(1, printerId);
+            ResultSet rs = pstmt.executeQuery();
+
+            while (rs.next()) {
+                Map<String, Object> record = new HashMap<>();
+                record.put("total_prints", rs.getLong("total_prints"));
+                record.put("time_of_update", rs.getTimestamp("time_of_update"));
+                history.add(record);
+            }
+
+        } catch (SQLException e) {
+            log.error("Error getting count history for printer {}: {}", printerId, e.getMessage(), e);
+        }
+
+        return history;
+    }
+
+    /**
+     * Calculate pages printed since last reading
+     */
+    public Long getPagesSinceLastReading(UUID printerId) {
+        String sql = """
+        SELECT total_prints 
+        FROM COUNTS 
+        WHERE printer_id = ? 
+        ORDER BY time_of_update DESC 
+        LIMIT 2
+        """;
+
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setObject(1, printerId);
+            ResultSet rs = pstmt.executeQuery();
+
+            List<Long> lastTwoCounts = new ArrayList<>();
+            while (rs.next() && lastTwoCounts.size() < 2) {
+                lastTwoCounts.add(rs.getLong("total_prints"));
+            }
+
+            if (lastTwoCounts.size() == 2) {
+                // Current count - previous count = pages printed
+                return lastTwoCounts.get(0) - lastTwoCounts.get(1);
+            }
+
+        } catch (SQLException e) {
+            log.error("Error calculating pages since last reading for printer {}: {}", printerId, e.getMessage(), e);
+        }
+
+        return null; // Not enough data or error
     }
 
     /**
@@ -513,14 +628,23 @@ public class DatabaseManager {
     }
 
     /**
-     * Clean up old data (older than specified days)
-     * Note: COUNTS table is not cleaned as it maintains current state per printer
+     * Clean up old data with different retention periods
+     * - COUNTS: Keep longer for historical analysis (default 365 days)
+     * - COMPONENTS: Keep medium term (default specified days)
+     * - ALERTS: Keep short term (default specified days)
      */
     public void cleanupOldData(int daysToKeep) {
+        cleanupOldData(daysToKeep, 365); // Keep counts for 1 year by default
+    }
+
+    /**
+     * Clean up old data with custom retention periods
+     */
+    public void cleanupOldData(int alertsAndComponentsDays, int countsDays) {
         String[] cleanupQueries = {
-                "DELETE FROM ALERTS WHERE time_of_update < CURRENT_TIMESTAMP - INTERVAL '" + daysToKeep + " days'",
-                "DELETE FROM COMPONENTS WHERE time_of_update < CURRENT_TIMESTAMP - INTERVAL '" + daysToKeep + " days'"
-                // COUNTS table excluded - maintains current state per printer
+                "DELETE FROM ALERTS WHERE time_of_update < CURRENT_TIMESTAMP - INTERVAL '" + alertsAndComponentsDays + " days'",
+                "DELETE FROM COMPONENTS WHERE time_of_update < CURRENT_TIMESTAMP - INTERVAL '" + alertsAndComponentsDays + " days'",
+                "DELETE FROM COUNTS WHERE time_of_update < CURRENT_TIMESTAMP - INTERVAL '" + countsDays + " days'" // Keep counts longer
         };
 
         try (Connection conn = getConnection()) {
@@ -530,6 +654,8 @@ public class DatabaseManager {
                     log.debug("Cleaned up {} records with query: {}", deleted, query);
                 }
             }
+            log.info("Cleanup completed: alerts/components kept for {} days, counts kept for {} days",
+                    alertsAndComponentsDays, countsDays);
         } catch (SQLException e) {
             log.error("Error during cleanup: {}", e.getMessage(), e);
         }
