@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.abcsolpro.printwatch</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Applications/Printwatch.app/Contents/MacOS/Printwatch</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/var/log/printwatch/stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/var/log/printwatch/stderr.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Applications/Printwatch.app/Contents</string>
+
+    <key>UserName</key>
+    <string>_printwatch</string>
+
+    <key>GroupName</key>
+    <string>_printwatch</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>JAVA_HOME</key>
+        <string>/Applications/Printwatch.app/Contents/runtime</string>
+    </dict>
+</dict>
+</plist>
