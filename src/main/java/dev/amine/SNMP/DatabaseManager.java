@@ -33,6 +33,7 @@ public class DatabaseManager {
             try (PreparedStatement stmt = conn.prepareStatement(clientSql)) {
                 stmt.setObject(1, DEFAULT_CLIENT_ID);
                 stmt.executeUpdate();
+                log.debug("Default client ensured in database");
             }
 
             // Create default tarif model
@@ -42,6 +43,7 @@ public class DatabaseManager {
             try (PreparedStatement stmt = conn.prepareStatement(tarifSql)) {
                 stmt.setString(1, DEFAULT_TARIF_MODEL);
                 stmt.executeUpdate();
+                log.debug("Default tarif model ensured in database");
             }
         }
     }
@@ -50,10 +52,46 @@ public class DatabaseManager {
         return DriverManager.getConnection(JDBC_URL, USER, PASSWORD);
     }
 
+    /**
+     * Ensure a tarif record exists for the given model name
+     */
+    private void ensureTarifExists(String modelName) {
+        if (modelName == null || modelName.trim().isEmpty()) {
+            modelName = DEFAULT_TARIF_MODEL;
+        }
+
+        String sql = "INSERT INTO TARIFS (model_name, bw_print_price, colored_print_price, a3_print_price, a4_print_price) " +
+                "VALUES (?, 0.05, 0.15, 0.20, 0.10) " +
+                "ON CONFLICT (model_name) DO NOTHING";
+
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, modelName);
+            int rowsAffected = pstmt.executeUpdate();
+
+            if (rowsAffected > 0) {
+                log.debug("Created tarif record for model: {}", modelName);
+            }
+
+        } catch (SQLException e) {
+            log.error("Error ensuring tarif exists for model {}: {}", modelName, e.getMessage(), e);
+        }
+    }
+
     public UUID upsertPrinter(PrinterDevice printer) {
+        // Determine model name, use default if null/empty
+        String modelName = printer.getModelName();
+        if (modelName == null || modelName.trim().isEmpty()) {
+            modelName = DEFAULT_TARIF_MODEL;
+        }
+
+        // Ensure tarif record exists for this model
+        ensureTarifExists(modelName);
+
         String sql = """
-        INSERT INTO PRINTER (model_name, serial_number, mac_address, ip_address, is_color, is_a3, client_id, tarif_model, last_updated)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO PRINTER (model_name, serial_number, mac_address, ip_address, is_color, is_a3, client_id, last_updated)
+        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT (serial_number)
         DO UPDATE SET
             model_name = EXCLUDED.model_name,
@@ -68,23 +106,22 @@ public class DatabaseManager {
         try (Connection conn = getConnection();
              PreparedStatement pstmt = conn.prepareStatement(sql)) {
 
-            pstmt.setString(1, printer.getModelName() != null ? printer.getModelName() : "Unknown Model");
+            pstmt.setString(1, modelName);
             pstmt.setString(2, printer.getSerialNumber() != null ? printer.getSerialNumber() : "UNKNOWN_" + printer.getIpAddress());
             pstmt.setString(3, printer.getMacAddress());
             pstmt.setString(4, printer.getIpAddress());
             pstmt.setBoolean(5, printer.isColorPrinter());
             pstmt.setBoolean(6, printer.canPrintA3());
             pstmt.setObject(7, DEFAULT_CLIENT_ID);
-            pstmt.setString(8, DEFAULT_TARIF_MODEL);
 
             ResultSet rs = pstmt.executeQuery();
             if (rs.next()) {
                 UUID printerId = rs.getObject("id", UUID.class);
-                log.debug("Printer upserted successfully with ID: {}", printerId);
+                log.debug("Printer upserted successfully with ID: {} for model: {}", printerId, modelName);
                 return printerId;
             }
         } catch (SQLException e) {
-            log.error("Error upserting printer {}: {}", printer.getIpAddress(), e.getMessage(), e);
+            log.error("Error upserting printer {} with model {}: {}", printer.getIpAddress(), modelName, e.getMessage(), e);
         }
         return null;
     }
@@ -351,6 +388,117 @@ public class DatabaseManager {
             log.error("Error retrieving alerts: {}", e.getMessage(), e);
         }
         return alerts;
+    }
+
+    /**
+     * Get printer statistics for a specific printer
+     */
+    public Map<String, Object> getPrinterStats(UUID printerId) {
+        Map<String, Object> stats = new HashMap<>();
+
+        // Get latest counts
+        String countsSql = """
+        SELECT total_prints, time_of_update 
+        FROM COUNTS 
+        WHERE printer_id = ? 
+        ORDER BY time_of_update DESC 
+        LIMIT 1
+        """;
+
+        try (Connection conn = getConnection()) {
+            // Get counts
+            try (PreparedStatement pstmt = conn.prepareStatement(countsSql)) {
+                pstmt.setObject(1, printerId);
+                ResultSet rs = pstmt.executeQuery();
+                if (rs.next()) {
+                    stats.put("total_prints", rs.getLong("total_prints"));
+                    stats.put("last_count_update", rs.getTimestamp("time_of_update"));
+                }
+            }
+
+            // Get component counts
+            String componentsSql = """
+            SELECT COUNT(*) as component_count, supply_type
+            FROM COMPONENTS 
+            WHERE printer_id = ? 
+            AND time_of_update = (
+                SELECT MAX(time_of_update) 
+                FROM COMPONENTS 
+                WHERE printer_id = ?
+            )
+            GROUP BY supply_type
+            """;
+
+            try (PreparedStatement pstmt = conn.prepareStatement(componentsSql)) {
+                pstmt.setObject(1, printerId);
+                pstmt.setObject(2, printerId);
+                ResultSet rs = pstmt.executeQuery();
+                while (rs.next()) {
+                    stats.put(rs.getString("supply_type").toLowerCase() + "_count", rs.getInt("component_count"));
+                }
+            }
+
+            // Get alert counts
+            String alertsSql = """
+            SELECT COUNT(*) as alert_count
+            FROM ALERTS 
+            WHERE printer_id = ? 
+            AND time_of_update >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
+            """;
+
+            try (PreparedStatement pstmt = conn.prepareStatement(alertsSql)) {
+                pstmt.setObject(1, printerId);
+                ResultSet rs = pstmt.executeQuery();
+                if (rs.next()) {
+                    stats.put("recent_alerts", rs.getInt("alert_count"));
+                }
+            }
+
+        } catch (SQLException e) {
+            log.error("Error getting printer stats for {}: {}", printerId, e.getMessage(), e);
+        }
+
+        return stats;
+    }
+
+    /**
+     * Get pricing information for a printer model
+     */
+    public Map<String, Double> getPrinterPricing(String modelName) {
+        Map<String, Double> pricing = new HashMap<>();
+
+        String sql = "SELECT bw_print_price, colored_print_price, a3_print_price, a4_print_price " +
+                "FROM TARIFS WHERE model_name = ?";
+
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, modelName);
+            ResultSet rs = pstmt.executeQuery();
+
+            if (rs.next()) {
+                pricing.put("bw_print_price", rs.getDouble("bw_print_price"));
+                pricing.put("colored_print_price", rs.getDouble("colored_print_price"));
+                pricing.put("a3_print_price", rs.getDouble("a3_print_price"));
+                pricing.put("a4_print_price", rs.getDouble("a4_print_price"));
+            } else {
+                // Return default pricing if model not found
+                pricing.put("bw_print_price", 0.05);
+                pricing.put("colored_print_price", 0.15);
+                pricing.put("a3_print_price", 0.20);
+                pricing.put("a4_print_price", 0.10);
+            }
+
+        } catch (SQLException e) {
+            log.error("Error getting pricing for model {}: {}", modelName, e.getMessage(), e);
+            // Return default pricing on error
+            pricing.put("bw_print_price", 0.05);
+            pricing.put("colored_print_price", 0.15);
+            pricing.put("a3_print_price", 0.20);
+            pricing.put("a4_print_price", 0.10);
+        }
+
+        return pricing;
     }
 
     /**
