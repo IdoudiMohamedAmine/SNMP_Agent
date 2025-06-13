@@ -33,7 +33,6 @@ public class DatabaseManager {
             try (PreparedStatement stmt = conn.prepareStatement(clientSql)) {
                 stmt.setObject(1, DEFAULT_CLIENT_ID);
                 stmt.executeUpdate();
-                log.debug("Default client ensured in database");
             }
 
             // Create default tarif model
@@ -43,7 +42,6 @@ public class DatabaseManager {
             try (PreparedStatement stmt = conn.prepareStatement(tarifSql)) {
                 stmt.setString(1, DEFAULT_TARIF_MODEL);
                 stmt.executeUpdate();
-                log.debug("Default tarif model ensured in database");
             }
         }
     }
@@ -92,10 +90,15 @@ public class DatabaseManager {
     }
 
     public void insertCounts(UUID printerId, PrinterDevice printer) {
+        // Check if we already have recent data (within last 30 minutes) to prevent duplicates
+        if (hasRecentData(printerId, "COUNTS", 30)) {
+            log.debug("Skipping counts insert for printer {} - recent data exists", printerId);
+            return;
+        }
+
         String sql = """
         INSERT INTO COUNTS (printer_id, time_of_update, total_prints)
         VALUES (?, CURRENT_TIMESTAMP, ?)
-        ON CONFLICT (printer_id, time_of_update) DO UPDATE SET total_prints = EXCLUDED.total_prints
         """;
 
         try (Connection conn = getConnection();
@@ -105,7 +108,7 @@ public class DatabaseManager {
             pstmt.setLong(2, printer.getTotalPageCount() != null ? printer.getTotalPageCount() : 0L);
 
             int rowsAffected = pstmt.executeUpdate();
-            log.debug("Inserted/updated counts for printer {}: {} rows affected", printerId, rowsAffected);
+            log.debug("Inserted counts for printer {}: {} rows affected", printerId, rowsAffected);
 
         } catch (SQLException e) {
             log.error("Error inserting counts for printer {}: {}", printerId, e.getMessage(), e);
@@ -113,64 +116,84 @@ public class DatabaseManager {
     }
 
     public void insertSuppliesAndTrays(UUID printerId, PrinterDevice printer) {
+        // Check if we already have recent component data (within last 30 minutes) to prevent duplicates
+        if (hasRecentData(printerId, "COMPONENTS", 30)) {
+            log.debug("Skipping components insert for printer {} - recent data exists", printerId);
+            return;
+        }
+
+        // Use a single timestamp for all components in this batch
+        Timestamp batchTimestamp = new Timestamp(System.currentTimeMillis());
+
         String sql = """
         INSERT INTO COMPONENTS (printer_id, time_of_update, supply_name, current_level, max_level, supply_type)
-        VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?, ?)
-        ON CONFLICT (printer_id, time_of_update, supply_name) 
-        DO UPDATE SET 
-            current_level = EXCLUDED.current_level,
-            max_level = EXCLUDED.max_level,
-            supply_type = EXCLUDED.supply_type
+        VALUES (?, ?, ?, ?, ?, ?)
         """;
 
-        try (Connection conn = getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+        try (Connection conn = getConnection()) {
+            conn.setAutoCommit(false); // Use transaction to ensure all components are inserted together
 
-            int batchCount = 0;
+            try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                int batchCount = 0;
 
-            // Insert supplies (toner/ink)
-            if (printer.getSupplyLevels() != null && !printer.getSupplyLevels().isEmpty()) {
-                for (Map.Entry<String, Integer> entry : printer.getSupplyLevels().entrySet()) {
-                    String name = entry.getKey();
-                    int currentLevel = entry.getValue() != null ? entry.getValue() : 0;
-                    int maxLevel = printer.getSupplyMaxLevels().getOrDefault(name, 100);
+                // Insert supplies (toner/ink)
+                if (printer.getSupplyLevels() != null && !printer.getSupplyLevels().isEmpty()) {
+                    for (Map.Entry<String, Integer> entry : printer.getSupplyLevels().entrySet()) {
+                        String name = entry.getKey();
+                        int currentLevel = entry.getValue() != null ? entry.getValue() : 0;
+                        int maxLevel = printer.getSupplyMaxLevels().getOrDefault(name, 100);
 
-                    pstmt.setObject(1, printerId);
-                    pstmt.setString(2, name);
-                    pstmt.setInt(3, currentLevel);
-                    pstmt.setInt(4, maxLevel);
-                    pstmt.setString(5, "SUPPLY");
-                    pstmt.addBatch();
-                    batchCount++;
+                        pstmt.setObject(1, printerId);
+                        pstmt.setTimestamp(2, batchTimestamp);
+                        pstmt.setString(3, name);
+                        pstmt.setInt(4, currentLevel);
+                        pstmt.setInt(5, maxLevel);
+                        pstmt.setString(6, "SUPPLY");
+                        pstmt.addBatch();
+                        batchCount++;
+                    }
                 }
-                log.debug("Added {} supplies to batch for printer {}", printer.getSupplyLevels().size(), printerId);
-            }
 
-            // Insert trays (paper)
-            if (printer.getTrayLevels() != null && !printer.getTrayLevels().isEmpty()) {
-                for (Map.Entry<String, Integer> entry : printer.getTrayLevels().entrySet()) {
-                    String name = entry.getKey();
-                    int currentLevel = entry.getValue() != null ? entry.getValue() : 0;
-                    int maxLevel = printer.getTrayMaxLevels().getOrDefault(name, 100);
+                // Insert trays (paper)
+                if (printer.getTrayLevels() != null && !printer.getTrayLevels().isEmpty()) {
+                    for (Map.Entry<String, Integer> entry : printer.getTrayLevels().entrySet()) {
+                        String name = entry.getKey();
+                        int currentLevel = entry.getValue() != null ? entry.getValue() : 0;
+                        int maxLevel = printer.getTrayMaxLevels().getOrDefault(name, 100);
 
-                    pstmt.setObject(1, printerId);
-                    pstmt.setString(2, name);
-                    pstmt.setInt(3, currentLevel);
-                    pstmt.setInt(4, maxLevel);
-                    pstmt.setString(5, "TRAY");
-                    pstmt.addBatch();
-                    batchCount++;
+                        pstmt.setObject(1, printerId);
+                        pstmt.setTimestamp(2, batchTimestamp);
+                        pstmt.setString(3, name);
+                        pstmt.setInt(4, currentLevel);
+                        pstmt.setInt(5, maxLevel);
+                        pstmt.setString(6, "TRAY");
+                        pstmt.addBatch();
+                        batchCount++;
+                    }
                 }
-                log.debug("Added {} trays to batch for printer {}", printer.getTrayLevels().size(), printerId);
-            }
 
-            // Execute batch if we have any components to insert
-            if (batchCount > 0) {
-                int[] results = pstmt.executeBatch();
-                log.debug("Executed batch for printer {}: {} components processed, {} successful",
-                        printerId, batchCount, Arrays.stream(results).sum());
-            } else {
-                log.debug("No components to insert for printer {}", printerId);
+                // Execute batch if we have any components to insert
+                if (batchCount > 0) {
+                    int[] results = pstmt.executeBatch();
+                    conn.commit();
+                    int successCount = 0;
+                    for (int result : results) {
+                        if (result > 0) successCount++;
+                    }
+                    log.debug("Inserted {} components for printer {} (supplies: {}, trays: {})",
+                            successCount, printerId,
+                            printer.getSupplyLevels() != null ? printer.getSupplyLevels().size() : 0,
+                            printer.getTrayLevels() != null ? printer.getTrayLevels().size() : 0);
+                } else {
+                    conn.commit();
+                    log.debug("No components to insert for printer {}", printerId);
+                }
+
+            } catch (SQLException e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                conn.setAutoCommit(true);
             }
 
         } catch (SQLException e) {
@@ -180,7 +203,12 @@ public class DatabaseManager {
 
     public void insertAlerts(UUID printerId, List<String> alerts) {
         if (alerts == null || alerts.isEmpty()) {
-            log.debug("No alerts to insert for printer {}", printerId);
+            return;
+        }
+
+        // Check for recent alerts to prevent spam
+        if (hasRecentAlerts(printerId, 10)) {
+            log.debug("Skipping alerts insert for printer {} - recent alerts exist", printerId);
             return;
         }
 
@@ -205,12 +233,78 @@ public class DatabaseManager {
             }
 
             int[] results = pstmt.executeBatch();
-            log.debug("Inserted {} alerts for printer {}: {} successful",
-                    batchCount, printerId, Arrays.stream(results).sum());
+            int successCount = 0;
+            for (int result : results) {
+                if (result > 0) successCount++;
+            }
+            log.debug("Inserted {} alerts for printer {}", successCount, printerId);
 
         } catch (SQLException e) {
             log.error("Error inserting alerts for printer {}: {}", printerId, e.getMessage(), e);
         }
+    }
+
+    private boolean hasRecentData(UUID printerId, String tableType, int minutesThreshold) {
+        String sql;
+
+        switch (tableType.toUpperCase()) {
+            case "COUNTS":
+                sql = """
+                SELECT COUNT(*) FROM COUNTS 
+                WHERE printer_id = ? 
+                AND time_of_update >= CURRENT_TIMESTAMP - INTERVAL '%d minutes'
+                """.formatted(minutesThreshold);
+                break;
+            case "COMPONENTS":
+                sql = """
+                SELECT COUNT(*) FROM COMPONENTS 
+                WHERE printer_id = ? 
+                AND time_of_update >= CURRENT_TIMESTAMP - INTERVAL '%d minutes'
+                """.formatted(minutesThreshold);
+                break;
+            default:
+                return false;
+        }
+
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setObject(1, printerId);
+            ResultSet rs = pstmt.executeQuery();
+
+            if (rs.next()) {
+                return rs.getInt(1) > 0;
+            }
+
+        } catch (SQLException e) {
+            log.error("Error checking recent data: {}", e.getMessage());
+        }
+
+        return false;
+    }
+
+    private boolean hasRecentAlerts(UUID printerId, int minutesThreshold) {
+        String sql = """
+        SELECT COUNT(*) FROM ALERTS 
+        WHERE printer_id = ? 
+        AND time_of_update >= CURRENT_TIMESTAMP - INTERVAL '%d minutes'
+        """.formatted(minutesThreshold);
+
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setObject(1, printerId);
+            ResultSet rs = pstmt.executeQuery();
+
+            if (rs.next()) {
+                return rs.getInt(1) > 0;
+            }
+
+        } catch (SQLException e) {
+            log.error("Error checking recent alerts: {}", e.getMessage());
+        }
+
+        return false;
     }
 
     private String determineAlertType(String alert) {
@@ -253,83 +347,10 @@ public class DatabaseManager {
                 alerts.add(alert);
             }
 
-            log.debug("Retrieved {} active alerts from database", alerts.size());
-
         } catch (SQLException e) {
             log.error("Error retrieving alerts: {}", e.getMessage(), e);
         }
         return alerts;
-    }
-
-    /**
-     * Get printer statistics for a specific printer
-     */
-    public Map<String, Object> getPrinterStats(UUID printerId) {
-        Map<String, Object> stats = new HashMap<>();
-
-        // Get latest counts
-        String countsSql = """
-        SELECT total_prints, time_of_update 
-        FROM COUNTS 
-        WHERE printer_id = ? 
-        ORDER BY time_of_update DESC 
-        LIMIT 1
-        """;
-
-        try (Connection conn = getConnection()) {
-            // Get counts
-            try (PreparedStatement pstmt = conn.prepareStatement(countsSql)) {
-                pstmt.setObject(1, printerId);
-                ResultSet rs = pstmt.executeQuery();
-                if (rs.next()) {
-                    stats.put("total_prints", rs.getLong("total_prints"));
-                    stats.put("last_count_update", rs.getTimestamp("time_of_update"));
-                }
-            }
-
-            // Get component counts
-            String componentsSql = """
-            SELECT COUNT(*) as component_count, supply_type
-            FROM COMPONENTS 
-            WHERE printer_id = ? 
-            AND time_of_update = (
-                SELECT MAX(time_of_update) 
-                FROM COMPONENTS 
-                WHERE printer_id = ?
-            )
-            GROUP BY supply_type
-            """;
-
-            try (PreparedStatement pstmt = conn.prepareStatement(componentsSql)) {
-                pstmt.setObject(1, printerId);
-                pstmt.setObject(2, printerId);
-                ResultSet rs = pstmt.executeQuery();
-                while (rs.next()) {
-                    stats.put(rs.getString("supply_type").toLowerCase() + "_count", rs.getInt("component_count"));
-                }
-            }
-
-            // Get alert counts
-            String alertsSql = """
-            SELECT COUNT(*) as alert_count
-            FROM ALERTS 
-            WHERE printer_id = ? 
-            AND time_of_update >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
-            """;
-
-            try (PreparedStatement pstmt = conn.prepareStatement(alertsSql)) {
-                pstmt.setObject(1, printerId);
-                ResultSet rs = pstmt.executeQuery();
-                if (rs.next()) {
-                    stats.put("recent_alerts", rs.getInt("alert_count"));
-                }
-            }
-
-        } catch (SQLException e) {
-            log.error("Error getting printer stats for {}: {}", printerId, e.getMessage(), e);
-        }
-
-        return stats;
     }
 
     /**
