@@ -127,15 +127,13 @@ public class DatabaseManager {
     }
 
     public void insertCounts(UUID printerId, PrinterDevice printer) {
-        // Check if we already have recent data (within last 30 minutes) to prevent duplicates
-        if (hasRecentData(printerId, "COUNTS", 30)) {
-            log.debug("Skipping counts insert for printer {} - recent data exists", printerId);
-            return;
-        }
-
         String sql = """
         INSERT INTO COUNTS (printer_id, time_of_update, total_prints)
         VALUES (?, CURRENT_TIMESTAMP, ?)
+        ON CONFLICT (printer_id) 
+        DO UPDATE SET 
+            time_of_update = CURRENT_TIMESTAMP,
+            total_prints = EXCLUDED.total_prints
         """;
 
         try (Connection conn = getConnection();
@@ -145,10 +143,10 @@ public class DatabaseManager {
             pstmt.setLong(2, printer.getTotalPageCount() != null ? printer.getTotalPageCount() : 0L);
 
             int rowsAffected = pstmt.executeUpdate();
-            log.debug("Inserted counts for printer {}: {} rows affected", printerId, rowsAffected);
+            log.debug("Upserted counts for printer {}: {} rows affected", printerId, rowsAffected);
 
         } catch (SQLException e) {
-            log.error("Error inserting counts for printer {}: {}", printerId, e.getMessage(), e);
+            log.error("Error upserting counts for printer {}: {}", printerId, e.getMessage(), e);
         }
     }
 
@@ -285,13 +283,6 @@ public class DatabaseManager {
         String sql;
 
         switch (tableType.toUpperCase()) {
-            case "COUNTS":
-                sql = """
-                SELECT COUNT(*) FROM COUNTS 
-                WHERE printer_id = ? 
-                AND time_of_update >= CURRENT_TIMESTAMP - INTERVAL '%d minutes'
-                """.formatted(minutesThreshold);
-                break;
             case "COMPONENTS":
                 sql = """
                 SELECT COUNT(*) FROM COMPONENTS 
@@ -396,14 +387,8 @@ public class DatabaseManager {
     public Map<String, Object> getPrinterStats(UUID printerId) {
         Map<String, Object> stats = new HashMap<>();
 
-        // Get latest counts
-        String countsSql = """
-        SELECT total_prints, time_of_update 
-        FROM COUNTS 
-        WHERE printer_id = ? 
-        ORDER BY time_of_update DESC 
-        LIMIT 1
-        """;
+        // Get current counts (only one record per printer now)
+        String countsSql = "SELECT total_prints, time_of_update FROM COUNTS WHERE printer_id = ?";
 
         try (Connection conn = getConnection()) {
             // Get counts
@@ -462,6 +447,32 @@ public class DatabaseManager {
     }
 
     /**
+     * Get current count information for a printer
+     */
+    public Map<String, Object> getCurrentCount(UUID printerId) {
+        Map<String, Object> countInfo = new HashMap<>();
+
+        String sql = "SELECT total_prints, time_of_update FROM COUNTS WHERE printer_id = ?";
+
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setObject(1, printerId);
+            ResultSet rs = pstmt.executeQuery();
+
+            if (rs.next()) {
+                countInfo.put("total_prints", rs.getLong("total_prints"));
+                countInfo.put("time_of_update", rs.getTimestamp("time_of_update"));
+            }
+
+        } catch (SQLException e) {
+            log.error("Error getting current count for printer {}: {}", printerId, e.getMessage(), e);
+        }
+
+        return countInfo;
+    }
+
+    /**
      * Get pricing information for a printer model
      */
     public Map<String, Double> getPrinterPricing(String modelName) {
@@ -503,12 +514,13 @@ public class DatabaseManager {
 
     /**
      * Clean up old data (older than specified days)
+     * Note: COUNTS table is not cleaned as it maintains current state per printer
      */
     public void cleanupOldData(int daysToKeep) {
         String[] cleanupQueries = {
                 "DELETE FROM ALERTS WHERE time_of_update < CURRENT_TIMESTAMP - INTERVAL '" + daysToKeep + " days'",
-                "DELETE FROM COMPONENTS WHERE time_of_update < CURRENT_TIMESTAMP - INTERVAL '" + daysToKeep + " days'",
-                "DELETE FROM COUNTS WHERE time_of_update < CURRENT_TIMESTAMP - INTERVAL '" + daysToKeep + " days'"
+                "DELETE FROM COMPONENTS WHERE time_of_update < CURRENT_TIMESTAMP - INTERVAL '" + daysToKeep + " days'"
+                // COUNTS table excluded - maintains current state per printer
         };
 
         try (Connection conn = getConnection()) {
