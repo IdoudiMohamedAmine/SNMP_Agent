@@ -1,31 +1,12 @@
 [Unit]
 Description=Printwatch SNMP Agent
-Documentation=https://your-documentation-url.com
 After=network.target
-Wants=network.target
 
 [Service]
-Type=simple
 User=printwatch
-Group=printwatch
-WorkingDirectory=/opt/printwatch
-ExecStart=/opt/printwatch/bin/Printwatch
-ExecReload=/bin/kill -HUP $MAINPID
-KillMode=process
-Restart=on-failure
-RestartPreventExitStatus=255
-TimeoutStopSec=10
-
-# Security settings
-NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectSystem=strict
-ProtectHome=yes
-ReadWritePaths=/var/log/printwatch /var/lib/printwatch
-
-# Environment
-Environment=JAVA_HOME=/opt/printwatch/runtime
-Environment=PATH=/opt/printwatch/runtime/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/opt/Printwatch/bin/Printwatch
+Restart=always
+RestartSec=30
 
 [Install]
 WantedBy=multi-user.target

@@ -1,116 +1,344 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
-         http://maven.apache.org/xsd/maven-4.0.0.xsd">
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>dev.amine</groupId>
-    <artifactId>printwatch</artifactId>
-    <version>1.0.0</version>
-    <packaging>jar</packaging>
-
-    <name>PrintWatch SNMP Agent</name>
-    <description>SNMP Printer Monitoring Agent</description>
+    <artifactId>Printwatch</artifactId>
+    <version>1.0-SNAPSHOT</version>
 
     <properties>
-        <maven.compiler.source>17</maven.compiler.source>
-        <maven.compiler.target>17</maven.compiler.target>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <mainClass>dev.amine.SNMP.PrintWatchAgent</mainClass>
     </properties>
 
     <dependencies>
-        <!-- SNMP4J for SNMP operations -->
         <dependency>
             <groupId>org.snmp4j</groupId>
             <artifactId>snmp4j</artifactId>
-            <version>3.7.7</version>
+            <version>3.6.5</version>
         </dependency>
-
-        <!-- PostgreSQL Driver -->
-        <dependency>
-            <groupId>org.postgresql</groupId>
-            <artifactId>postgresql</artifactId>
-            <version>42.7.1</version>
-        </dependency>
-
-        <!-- Lombok for boilerplate code -->
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
-            <version>1.18.30</version>
+            <version>1.18.36</version>
             <scope>provided</scope>
         </dependency>
-
-        <!-- SLF4J API -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.3</version>
+        </dependency>
+        <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+            <version>5.0.1</version>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>1.2.11</version>
+        </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
-            <version>2.0.9</version>
-        </dependency>
-
-        <!-- SLF4J Simple implementation -->
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-simple</artifactId>
-            <version>2.0.9</version>
+            <version>1.7.32</version>
         </dependency>
     </dependencies>
 
     <build>
         <plugins>
-            <!-- Compiler Plugin -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
                 <configuration>
-                    <source>17</source>
-                    <target>17</target>
-                    <annotationProcessorPaths>
-                        <path>
-                            <groupId>org.projectlombok</groupId>
-                            <artifactId>lombok</artifactId>
-                            <version>1.18.30</version>
-                        </path>
-                    </annotationProcessorPaths>
+                    <source>${maven.compiler.source}</source>
+                    <target>${maven.compiler.target}</target>
                 </configuration>
             </plugin>
 
-            <!-- Shade Plugin for creating uber-jar -->
             <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-shade-plugin</artifactId>
-                <version>3.5.1 </version>
+                <artifactId>maven-assembly-plugin</artifactId>
+                <version>3.6.0</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>dev.amine.SNMP.PrintWatchAgent</mainClass>
+                        </manifest>
+                    </archive>
+                    <descriptorRefs>
+                        <descriptorRef>jar-with-dependencies</descriptorRef>
+                    </descriptorRefs>
+                </configuration>
                 <executions>
                     <execution>
+                        <id>make-assembly</id>
                         <phase>package</phase>
                         <goals>
-                            <goal>shade</goal>
+                            <goal>single</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Copy service files to target directory -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <version>3.3.1</version>
+                <executions>
+                    <execution>
+                        <id>copy-service-files</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
                         </goals>
                         <configuration>
-                            <createDependencyReducedPom>false</createDependencyReducedPom>
-                            <transformers>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>${mainClass}</mainClass>
-                                </transformer>
-                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
-                            </transformers>
-                            <filters>
-                                <filter>
-                                    <artifact>*:*</artifact>
-                                    <excludes>
-                                        <exclude>META-INF/*.SF</exclude>
-                                        <exclude>META-INF/*.DSA</exclude>
-                                        <exclude>META-INF/*.RSA</exclude>
-                                    </excludes>
-                                </filter>
-                            </filters>
+                            <outputDirectory>${project.build.directory}/service-files</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>src/main/resources/service</directory>
+                                    <includes>
+                                        <include>**/*</include>
+                                    </includes>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- jpackage plugin for creating native installers -->
+            <plugin>
+                <groupId>org.panteleyev</groupId>
+                <artifactId>jpackage-maven-plugin</artifactId>
+                <version>1.6.0</version>
+                <configuration>
+                    <name>Printwatch</name>
+                    <appVersion>${project.version}</appVersion>
+                    <vendor>AbcsolPro</vendor>
+                    <copyright>Copyright © 2024 AbcsolPro</copyright>
+                    <description>SNMP Print Monitoring Agent</description>
+                    <input>${project.build.directory}</input>
+                    <destination>${project.build.directory}/dist</destination>
+                    <mainJar>${project.artifactId}-${project.version}-jar-with-dependencies.jar</mainJar>
+                    <mainClass>dev.amine.SNMP.PrintWatchAgent</mainClass>
+                    <runtimeImage>${java.home}</runtimeImage>
+
+                    <!-- Simplified Java options - removed problematic ones -->
+                    <javaOptions>
+                        <javaOption>-Djava.awt.headless=true</javaOption>
+                    </javaOptions>
+                </configuration>
+
+                <executions>
+                    <!-- Windows MSI Installer -->
+                    <execution>
+                        <id>win-msi</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jpackage</goal>
+                        </goals>
+                        <configuration>
+                            <options>
+                                <option>--type</option>
+                                <option>msi</option>
+                                <option>--win-menu</option>
+                                <option>--win-dir-chooser</option>
+                                <option>--win-shortcut</option>
+                                <option>--win-menu-group</option>
+                                <option>AbcsolPro</option>
+                            </options>
+                        </configuration>
+                    </execution>
+
+                    <!-- Linux DEB Package -->
+                    <execution>
+                        <id>linux-deb</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jpackage</goal>
+                        </goals>
+                        <configuration>
+                            <options>
+                                <option>--type</option>
+                                <option>deb</option>
+                                <option>--linux-package-name</option>
+                                <option>printwatch</option>
+                                <option>--linux-deb-maintainer</option>
+                                <option>support@abcsolpro.com</option>
+                                <option>--linux-app-category</option>
+                                <option>System</option>
+                                <option>--linux-shortcut</option>
+                            </options>
+                        </configuration>
+                    </execution>
+
+                    <!-- Linux RPM Package -->
+                    <execution>
+                        <id>linux-rpm</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jpackage</goal>
+                        </goals>
+                        <configuration>
+                            <options>
+                                <option>--type</option>
+                                <option>rpm</option>
+                                <option>--linux-package-name</option>
+                                <option>printwatch</option>
+                                <option>--linux-app-category</option>
+                                <option>System</option>
+                                <option>--linux-rpm-license-type</option>
+                                <option>MIT</option>
+                                <option>--linux-shortcut</option>
+                            </options>
+                        </configuration>
+                    </execution>
+
+                    <!-- macOS PKG Installer -->
+                    <execution>
+                        <id>mac-pkg</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jpackage</goal>
+                        </goals>
+                        <configuration>
+                            <options>
+                                <option>--type</option>
+                                <option>pkg</option>
+                                <option>--mac-package-name</option>
+                                <option>Printwatch</option>
+                                <option>--mac-package-identifier</option>
+                                <option>com.abcsolpro.printwatch</option>
+                            </options>
+                        </configuration>
+                    </execution>
+
+                    <!-- macOS DMG Image -->
+                    <execution>
+                        <id>mac-dmg</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jpackage</goal>
+                        </goals>
+                        <configuration>
+                            <options>
+                                <option>--type</option>
+                                <option>dmg</option>
+                                <option>--mac-package-name</option>
+                                <option>Printwatch</option>
+                                <option>--mac-package-identifier</option>
+                                <option>com.abcsolpro.printwatch</option>
+                            </options>
                         </configuration>
                     </execution>
                 </executions>
             </plugin>
         </plugins>
     </build>
+
+    <!-- Platform-specific profiles -->
+    <profiles>
+        <profile>
+            <id>windows</id>
+            <activation>
+                <os>
+                    <family>windows</family>
+                </os>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.panteleyev</groupId>
+                        <artifactId>jpackage-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>linux-deb</id>
+                                <phase>none</phase>
+                            </execution>
+                            <execution>
+                                <id>linux-rpm</id>
+                                <phase>none</phase>
+                            </execution>
+                            <execution>
+                                <id>mac-pkg</id>
+                                <phase>none</phase>
+                            </execution>
+                            <execution>
+                                <id>mac-dmg</id>
+                                <phase>none</phase>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <profile>
+            <id>linux</id>
+            <activation>
+                <os>
+                    <family>unix</family>
+                    <name>Linux</name>
+                </os>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.panteleyev</groupId>
+                        <artifactId>jpackage-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>win-msi</id>
+                                <phase>none</phase>
+                            </execution>
+                            <execution>
+                                <id>mac-pkg</id>
+                                <phase>none</phase>
+                            </execution>
+                            <execution>
+                                <id>mac-dmg</id>
+                                <phase>none</phase>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <profile>
+            <id>mac</id>
+            <activation>
+                <os>
+                    <family>mac</family>
+                </os>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.panteleyev</groupId>
+                        <artifactId>jpackage-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>win-msi</id>
+                                <phase>none</phase>
+                            </execution>
+                            <execution>
+                                <id>linux-deb</id>
+                                <phase>none</phase>
+                            </execution>
+                            <execution>
+                                <id>linux-rpm</id>
+                                <phase>none</phase>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

@@ -1,30 +1,23 @@
 #!/bin/bash
+# Simple post-install script for Linux
+echo "Printwatch has been installed successfully!"
+echo "You can find the application in your applications menu."
 
-# Create user and group
-if ! getent group printwatch > /dev/null 2>&1; then
-    groupadd --system printwatch
+# Make sure the executable has proper permissions
+chmod +x /opt/printwatch/bin/Printwatch
+
+# Create a simple desktop entry (optional)
+if [ -d "/usr/share/applications" ]; then
+    cat > /usr/share/applications/printwatch.desktop << EOF
+[Desktop Entry]
+Name=Printwatch
+Comment=SNMP Print Monitoring Agent
+Exec=/opt/printwatch/bin/Printwatch
+Icon=/opt/printwatch/lib/app/Printwatch.png
+Terminal=false
+Type=Application
+Categories=System;Network;
+EOF
 fi
 
-if ! getent passwd printwatch > /dev/null 2>&1; then
-    useradd --system --gid printwatch --home-dir /opt/printwatch \
-            --shell /bin/false --comment "Printwatch SNMP Agent" printwatch
-fi
-
-# Create directories
-mkdir -p /var/log/printwatch
-mkdir -p /var/lib/printwatch
-chown printwatch:printwatch /var/log/printwatch
-chown printwatch:printwatch /var/lib/printwatch
-chmod 755 /var/log/printwatch
-chmod 755 /var/lib/printwatch
-
-# Set ownership
-chown -R printwatch:printwatch /opt/printwatch
-
-# Install and enable systemd service
-cp /opt/printwatch/lib/printwatch.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable printwatch.service
-systemctl start printwatch.service
-
-echo "Printwatch service installed and started successfully"
+exit 0

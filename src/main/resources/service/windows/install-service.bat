@@ -1,12 +1,9 @@
 @echo off
-echo Installing Printwatch Service...
+set SERVICE_NAME=PrintwatchAgent
+set DISPLAY_NAME=Printwatch SNMP Agent
+set BIN_PATH="%~dp0bin\Printwatch.exe"
 
-REM The Windows service is automatically handled by jpackage --win-service
-REM This script is just for manual installation if needed
-
-sc create "PrintwatchAgent" binPath= "%~dp0\..\Printwatch.exe" DisplayName= "Printwatch SNMP Agent" start= auto
-sc description "PrintwatchAgent" "SNMP Print Monitoring Agent Service"
-sc start "PrintwatchAgent"
-
-echo Service installed and started successfully
-pause
+sc create %SERVICE_NAME% binPath=%BIN_PATH% start=auto DisplayName="%DISPLAY_NAME%"
+sc description %SERVICE_NAME% "Monitors printer status via SNMP"
+sc failure %SERVICE_NAME% reset=0 actions=restart/5000
+sc start %SERVICE_NAME%
