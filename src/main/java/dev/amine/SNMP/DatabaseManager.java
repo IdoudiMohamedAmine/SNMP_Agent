@@ -11,10 +11,10 @@ public class DatabaseManager {
     private static final String PASSWORD = "39qby106r4u1Be3_yEKfr-t1gwptD0";
 
     // Default pricing constants
-    private static final double DEFAULT_BW_PRICE = 0.05;
-    private static final double DEFAULT_COLOR_PRICE = 0.15;
-    private static final double DEFAULT_A3_PRICE = 0.20;
-    private static final double DEFAULT_A4_PRICE = 0.10;
+    private static final double DEFAULT_BW_PRICE = 1;
+    private static final double DEFAULT_COLOR_PRICE = 1;
+    private static final double DEFAULT_A3_PRICE = 1;
+    private static final double DEFAULT_A4_PRICE = 1;
 
     static {
         try {
