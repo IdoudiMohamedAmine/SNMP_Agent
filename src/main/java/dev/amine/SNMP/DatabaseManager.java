@@ -31,8 +31,22 @@ public class DatabaseManager {
 
     public UUID upsertPrinter(PrinterDevice printer) {
         String modelName = printer.getModelName();
+
+        // Handle null or empty model names by using a fallback
         if (modelName == null || modelName.trim().isEmpty()) {
-            modelName = "UNKNOWN_MODEL";
+            // Use serial number or IP as fallback model name
+            String serialNumber = printer.getSerialNumber();
+            if (serialNumber != null && !serialNumber.trim().isEmpty()) {
+                modelName = "MODEL_" + serialNumber.trim().replaceAll("[^a-zA-Z0-9]", "_").toUpperCase();
+            } else {
+                modelName = "MODEL_" + printer.getIpAddress().replaceAll("[^a-zA-Z0-9]", "_").toUpperCase();
+            }
+            log.info("Generated model name '{}' for printer with IP {}", modelName, printer.getIpAddress());
+        }
+
+        // Ensure the tarif exists for this model
+        if (!tarifExists(modelName)) {
+            createDefaultTarif(modelName);
         }
 
         String sql = """
@@ -70,6 +84,115 @@ public class DatabaseManager {
             log.error("Error upserting printer {} with model {}: {}", printer.getIpAddress(), modelName, e.getMessage(), e);
         }
         return null;
+    }
+
+    /**
+     * Check if a tarif exists for the given model name
+     */
+    private boolean tarifExists(String modelName) {
+        String sql = "SELECT COUNT(*) FROM tarifs WHERE model_name = ?";
+
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, modelName);
+            ResultSet rs = pstmt.executeQuery();
+
+            if (rs.next()) {
+                return rs.getInt(1) > 0;
+            }
+        } catch (SQLException e) {
+            log.error("Error checking if tarif exists for model {}: {}", modelName, e.getMessage());
+        }
+
+        return false;
+    }
+
+    /**
+     * Create a default tarif entry for a new model
+     */
+    private void createDefaultTarif(String modelName) {
+        String sql = """
+        INSERT INTO tarifs (model_name, bw_print_price, colored_print_price, a3_print_price, a4_print_price)
+        VALUES (?, ?, ?, ?, ?)
+        """;
+
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, modelName);
+            pstmt.setDouble(2, DEFAULT_BW_PRICE);
+            pstmt.setDouble(3, DEFAULT_COLOR_PRICE);
+            pstmt.setDouble(4, DEFAULT_A3_PRICE);
+            pstmt.setDouble(5, DEFAULT_A4_PRICE);
+
+            int rowsAffected = pstmt.executeUpdate();
+            if (rowsAffected > 0) {
+                log.info("Created default tarif for new model: {} with prices (BW: {}, Color: {}, A3: {}, A4: {})",
+                        modelName, DEFAULT_BW_PRICE, DEFAULT_COLOR_PRICE, DEFAULT_A3_PRICE, DEFAULT_A4_PRICE);
+            }
+        } catch (SQLException e) {
+            log.error("Error creating default tarif for model {}: {}", modelName, e.getMessage());
+            // Don't throw exception here to avoid breaking printer insertion
+        }
+    }
+
+    /**
+     * Update tarif pricing for a specific model (optional utility method)
+     */
+    public boolean updateTarif(String modelName, double bwPrice, double colorPrice, double a3Price, double a4Price) {
+        String sql = """
+        UPDATE tarifs 
+        SET bw_print_price = ?, colored_print_price = ?, a3_print_price = ?, a4_print_price = ?
+        WHERE model_name = ?
+        """;
+
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setDouble(1, bwPrice);
+            pstmt.setDouble(2, colorPrice);
+            pstmt.setDouble(3, a3Price);
+            pstmt.setDouble(4, a4Price);
+            pstmt.setString(5, modelName);
+
+            int rowsAffected = pstmt.executeUpdate();
+            if (rowsAffected > 0) {
+                log.info("Updated tarif for model: {} with new prices", modelName);
+                return true;
+            }
+        } catch (SQLException e) {
+            log.error("Error updating tarif for model {}: {}", modelName, e.getMessage());
+        }
+
+        return false;
+    }
+
+    /**
+     * Get all models and their tarifs (optional utility method)
+     */
+    public Map<String, Map<String, Double>> getAllTarifs() {
+        Map<String, Map<String, Double>> tarifs = new HashMap<>();
+        String sql = "SELECT model_name, bw_print_price, colored_print_price, a3_print_price, a4_print_price FROM tarifs";
+
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql);
+             ResultSet rs = pstmt.executeQuery()) {
+
+            while (rs.next()) {
+                String modelName = rs.getString("model_name");
+                Map<String, Double> prices = new HashMap<>();
+                prices.put("bw_price", rs.getDouble("bw_print_price"));
+                prices.put("color_price", rs.getDouble("colored_print_price"));
+                prices.put("a3_price", rs.getDouble("a3_print_price"));
+                prices.put("a4_price", rs.getDouble("a4_print_price"));
+                tarifs.put(modelName, prices);
+            }
+        } catch (SQLException e) {
+            log.error("Error retrieving all tarifs: {}", e.getMessage());
+        }
+
+        return tarifs;
     }
 
     public void insertCounts(UUID printerId, PrinterDevice printer) {
@@ -330,324 +453,5 @@ public class DatabaseManager {
             log.error("Error retrieving alerts: {}", e.getMessage(), e);
         }
         return alerts;
-    }
-
-    /**
-     * Get printer statistics for a specific printer
-     */
-    public Map<String, Object> getPrinterStats(UUID printerId) {
-        Map<String, Object> stats = new HashMap<>();
-
-        // Get latest count (most recent reading)
-        String countsSql = """
-        SELECT total_prints, time_of_update 
-        FROM COUNTS 
-        WHERE printer_id = ? 
-        ORDER BY time_of_update DESC 
-        LIMIT 1
-        """;
-
-        try (Connection conn = getConnection()) {
-            // Get latest count
-            try (PreparedStatement pstmt = conn.prepareStatement(countsSql)) {
-                pstmt.setObject(1, printerId);
-                ResultSet rs = pstmt.executeQuery();
-                if (rs.next()) {
-                    stats.put("total_prints", rs.getLong("total_prints"));
-                    stats.put("last_count_update", rs.getTimestamp("time_of_update"));
-                }
-            }
-
-            // Get count of historical records
-            String countHistorySql = "SELECT COUNT(*) as count_records FROM COUNTS WHERE printer_id = ?";
-            try (PreparedStatement pstmt = conn.prepareStatement(countHistorySql)) {
-                pstmt.setObject(1, printerId);
-                ResultSet rs = pstmt.executeQuery();
-                if (rs.next()) {
-                    stats.put("total_count_records", rs.getInt("count_records"));
-                }
-            }
-
-            // Calculate pages printed in last 24 hours
-            String dailyPagesSql = """
-            SELECT 
-                MAX(total_prints) - MIN(total_prints) as pages_last_24h
-            FROM COUNTS 
-            WHERE printer_id = ? 
-            AND time_of_update >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
-            """;
-            try (PreparedStatement pstmt = conn.prepareStatement(dailyPagesSql)) {
-                pstmt.setObject(1, printerId);
-                ResultSet rs = pstmt.executeQuery();
-                if (rs.next()) {
-                    long dailyPages = rs.getLong("pages_last_24h");
-                    if (!rs.wasNull()) {
-                        stats.put("pages_last_24h", dailyPages);
-                    }
-                }
-            }
-
-            // Get component counts
-            String componentsSql = """
-            SELECT COUNT(*) as component_count, supply_type
-            FROM COMPONENTS 
-            WHERE printer_id = ? 
-            AND time_of_update = (
-                SELECT MAX(time_of_update) 
-                FROM COMPONENTS 
-                WHERE printer_id = ?
-            )
-            GROUP BY supply_type
-            """;
-
-            try (PreparedStatement pstmt = conn.prepareStatement(componentsSql)) {
-                pstmt.setObject(1, printerId);
-                pstmt.setObject(2, printerId);
-                ResultSet rs = pstmt.executeQuery();
-                while (rs.next()) {
-                    stats.put(rs.getString("supply_type").toLowerCase() + "_count", rs.getInt("component_count"));
-                }
-            }
-
-            // Get alert counts
-            String alertsSql = """
-            SELECT COUNT(*) as alert_count
-            FROM ALERTS 
-            WHERE printer_id = ? 
-            AND time_of_update >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
-            """;
-
-            try (PreparedStatement pstmt = conn.prepareStatement(alertsSql)) {
-                pstmt.setObject(1, printerId);
-                ResultSet rs = pstmt.executeQuery();
-                if (rs.next()) {
-                    stats.put("recent_alerts", rs.getInt("alert_count"));
-                }
-            }
-
-        } catch (SQLException e) {
-            log.error("Error getting printer stats for {}: {}", printerId, e.getMessage(), e);
-        }
-
-        return stats;
-    }
-
-    /**
-     * Get the latest count information for a printer
-     */
-    public Map<String, Object> getCurrentCount(UUID printerId) {
-        Map<String, Object> countInfo = new HashMap<>();
-
-        String sql = """
-        SELECT total_prints, time_of_update 
-        FROM COUNTS 
-        WHERE printer_id = ? 
-        ORDER BY time_of_update DESC 
-        LIMIT 1
-        """;
-
-        try (Connection conn = getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
-            pstmt.setObject(1, printerId);
-            ResultSet rs = pstmt.executeQuery();
-
-            if (rs.next()) {
-                countInfo.put("total_prints", rs.getLong("total_prints"));
-                countInfo.put("time_of_update", rs.getTimestamp("time_of_update"));
-            }
-
-        } catch (SQLException e) {
-            log.error("Error getting current count for printer {}: {}", printerId, e.getMessage(), e);
-        }
-
-        return countInfo;
-    }
-
-    /**
-     * Get count history for a printer within a specified time range
-     */
-    public List<Map<String, Object>> getCountHistory(UUID printerId, int daysBack) {
-        List<Map<String, Object>> history = new ArrayList<>();
-
-        String sql = """
-        SELECT total_prints, time_of_update 
-        FROM COUNTS 
-        WHERE printer_id = ? 
-        AND time_of_update >= CURRENT_TIMESTAMP - INTERVAL '%d days'
-        ORDER BY time_of_update ASC
-        """.formatted(daysBack);
-
-        try (Connection conn = getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
-            pstmt.setObject(1, printerId);
-            ResultSet rs = pstmt.executeQuery();
-
-            while (rs.next()) {
-                Map<String, Object> record = new HashMap<>();
-                record.put("total_prints", rs.getLong("total_prints"));
-                record.put("time_of_update", rs.getTimestamp("time_of_update"));
-                history.add(record);
-            }
-
-        } catch (SQLException e) {
-            log.error("Error getting count history for printer {}: {}", printerId, e.getMessage(), e);
-        }
-
-        return history;
-    }
-
-    /**
-     * Calculate pages printed since last reading
-     */
-    public Long getPagesSinceLastReading(UUID printerId) {
-        String sql = """
-        SELECT total_prints 
-        FROM COUNTS 
-        WHERE printer_id = ? 
-        ORDER BY time_of_update DESC 
-        LIMIT 2
-        """;
-
-        try (Connection conn = getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
-            pstmt.setObject(1, printerId);
-            ResultSet rs = pstmt.executeQuery();
-
-            List<Long> lastTwoCounts = new ArrayList<>();
-            while (rs.next() && lastTwoCounts.size() < 2) {
-                lastTwoCounts.add(rs.getLong("total_prints"));
-            }
-
-            if (lastTwoCounts.size() == 2) {
-                // Current count - previous count = pages printed
-                return lastTwoCounts.get(0) - lastTwoCounts.get(1);
-            }
-
-        } catch (SQLException e) {
-            log.error("Error calculating pages since last reading for printer {}: {}", printerId, e.getMessage(), e);
-        }
-
-        return null; // Not enough data or error
-    }
-
-    /**
-     * Get pricing information for a printer model
-     * Returns default prices if no specific pricing found in database
-     */
-    public Map<String, Double> getPrinterPricing(String modelName) {
-        Map<String, Double> pricing = new HashMap<>();
-
-        // First try to get pricing from TARIFS table if it exists
-        String sql = "SELECT bw_print_price, colored_print_price, a3_print_price, a4_print_price " +
-                "FROM TARIFS WHERE model_name = ?";
-
-        try (Connection conn = getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
-            pstmt.setString(1, modelName);
-            ResultSet rs = pstmt.executeQuery();
-
-            if (rs.next()) {
-                // Found specific pricing for this model
-                pricing.put("bw_print_price", rs.getDouble("bw_print_price"));
-                pricing.put("colored_print_price", rs.getDouble("colored_print_price"));
-                pricing.put("a3_print_price", rs.getDouble("a3_print_price"));
-                pricing.put("a4_print_price", rs.getDouble("a4_print_price"));
-                log.debug("Found custom pricing for model: {}", modelName);
-            } else {
-                // No specific pricing found, use defaults
-                setDefaultPricing(pricing);
-                log.debug("Using default pricing for model: {}", modelName);
-            }
-
-        } catch (SQLException e) {
-            log.warn("Error getting pricing for model {} (using defaults): {}", modelName, e.getMessage());
-            // Use default pricing on any database error
-            setDefaultPricing(pricing);
-        }
-
-        return pricing;
-    }
-
-    /**
-     * Set default pricing values
-     */
-    private void setDefaultPricing(Map<String, Double> pricing) {
-        pricing.put("bw_print_price", DEFAULT_BW_PRICE);
-        pricing.put("colored_print_price", DEFAULT_COLOR_PRICE);
-        pricing.put("a3_print_price", DEFAULT_A3_PRICE);
-        pricing.put("a4_print_price", DEFAULT_A4_PRICE);
-    }
-
-    /**
-     * Create a tarif record for a specific model (optional - only if needed)
-     */
-    public boolean createTarifForModel(String modelName, double bwPrice, double colorPrice, double a3Price, double a4Price) {
-        String sql = """
-        INSERT INTO TARIFS (model_name, bw_print_price, colored_print_price, a3_print_price, a4_print_price) 
-        VALUES (?, ?, ?, ?, ?) 
-        ON CONFLICT (model_name) 
-        DO UPDATE SET
-            bw_print_price = EXCLUDED.bw_print_price,
-            colored_print_price = EXCLUDED.colored_print_price,
-            a3_print_price = EXCLUDED.a3_print_price,
-            a4_print_price = EXCLUDED.a4_print_price
-        """;
-
-        try (Connection conn = getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
-            pstmt.setString(1, modelName);
-            pstmt.setDouble(2, bwPrice);
-            pstmt.setDouble(3, colorPrice);
-            pstmt.setDouble(4, a3Price);
-            pstmt.setDouble(5, a4Price);
-
-            int rowsAffected = pstmt.executeUpdate();
-            log.info("Created/updated tarif for model {}: bw={}, color={}, a3={}, a4={}",
-                    modelName, bwPrice, colorPrice, a3Price, a4Price);
-            return rowsAffected > 0;
-
-        } catch (SQLException e) {
-            log.error("Error creating tarif for model {}: {}", modelName, e.getMessage(), e);
-            return false;
-        }
-    }
-
-    /**
-     * Clean up old data with different retention periods
-     * - COUNTS: Keep longer for historical analysis (default 365 days)
-     * - COMPONENTS: Keep medium term (default specified days)
-     * - ALERTS: Keep short term (default specified days)
-     */
-    public void cleanupOldData(int daysToKeep) {
-        cleanupOldData(daysToKeep, 365); // Keep counts for 1 year by default
-    }
-
-    /**
-     * Clean up old data with custom retention periods
-     */
-    public void cleanupOldData(int alertsAndComponentsDays, int countsDays) {
-        String[] cleanupQueries = {
-                "DELETE FROM ALERTS WHERE time_of_update < CURRENT_TIMESTAMP - INTERVAL '" + alertsAndComponentsDays + " days'",
-                "DELETE FROM COMPONENTS WHERE time_of_update < CURRENT_TIMESTAMP - INTERVAL '" + alertsAndComponentsDays + " days'",
-                "DELETE FROM COUNTS WHERE time_of_update < CURRENT_TIMESTAMP - INTERVAL '" + countsDays + " days'" // Keep counts longer
-        };
-
-        try (Connection conn = getConnection()) {
-            for (String query : cleanupQueries) {
-                try (PreparedStatement pstmt = conn.prepareStatement(query)) {
-                    int deleted = pstmt.executeUpdate();
-                    log.debug("Cleaned up {} records with query: {}", deleted, query);
-                }
-            }
-            log.info("Cleanup completed: alerts/components kept for {} days, counts kept for {} days",
-                    alertsAndComponentsDays, countsDays);
-        } catch (SQLException e) {
-            log.error("Error during cleanup: {}", e.getMessage(), e);
-        }
     }
 }
