@@ -58,7 +58,7 @@ public class DatabaseManager {
             pstmt.setString(4, printer.getIpAddress());
             pstmt.setBoolean(5, printer.isColorPrinter());
             pstmt.setBoolean(6, printer.canPrintA3());
-
+            pstmt.setObject(7, null); // No client assigned by default
 
             ResultSet rs = pstmt.executeQuery();
             if (rs.next()) {
