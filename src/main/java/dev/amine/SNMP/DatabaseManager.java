@@ -10,8 +10,6 @@ public class DatabaseManager {
     private static final String USER = "admin";
     private static final String PASSWORD = "39qby106r4u1Be3_yEKfr-t1gwptD0";
 
-    private static final UUID DEFAULT_CLIENT_ID = UUID.fromString("00000000-0000-0000-0000-000000000000");
-
     // Default pricing constants
     private static final double DEFAULT_BW_PRICE = 0.05;
     private static final double DEFAULT_COLOR_PRICE = 0.15;
@@ -60,7 +58,7 @@ public class DatabaseManager {
             pstmt.setString(4, printer.getIpAddress());
             pstmt.setBoolean(5, printer.isColorPrinter());
             pstmt.setBoolean(6, printer.canPrintA3());
-            pstmt.setObject(7, DEFAULT_CLIENT_ID);
+
 
             ResultSet rs = pstmt.executeQuery();
             if (rs.next()) {
