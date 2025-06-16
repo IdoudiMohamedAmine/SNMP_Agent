@@ -11,40 +11,19 @@ public class DatabaseManager {
     private static final String PASSWORD = "39qby106r4u1Be3_yEKfr-t1gwptD0";
 
     private static final UUID DEFAULT_CLIENT_ID = UUID.fromString("00000000-0000-0000-0000-000000000000");
-    private static final String DEFAULT_TARIF_MODEL = "DEFAULT_MODEL";
+
+    // Default pricing constants
+    private static final double DEFAULT_BW_PRICE = 0.05;
+    private static final double DEFAULT_COLOR_PRICE = 0.15;
+    private static final double DEFAULT_A3_PRICE = 0.20;
+    private static final double DEFAULT_A4_PRICE = 0.10;
 
     static {
         try {
             Class.forName("org.postgresql.Driver");
-            ensureDefaultEntitiesExist();
+            log.info("PostgreSQL JDBC Driver loaded successfully");
         } catch (ClassNotFoundException e) {
             throw new RuntimeException("PostgreSQL JDBC Driver not found", e);
-        } catch (SQLException e) {
-            log.error("Error initializing database defaults", e);
-        }
-    }
-
-    private static void ensureDefaultEntitiesExist() throws SQLException {
-        try (Connection conn = DriverManager.getConnection(JDBC_URL, USER, PASSWORD)) {
-            // Create default client
-            String clientSql = "INSERT INTO CLIENT (id, email, password, role, company) " +
-                    "VALUES (?, 'system@printwatch.local', 'systemPassword', 'SYSTEM', 'PrintWatch') " +
-                    "ON CONFLICT (id) DO NOTHING";
-            try (PreparedStatement stmt = conn.prepareStatement(clientSql)) {
-                stmt.setObject(1, DEFAULT_CLIENT_ID);
-                stmt.executeUpdate();
-                log.debug("Default client ensured in database");
-            }
-
-            // Create default tarif model
-            String tarifSql = "INSERT INTO TARIFS (model_name, bw_print_price, colored_print_price, a3_print_price, a4_print_price) " +
-                    "VALUES (?, 0.05, 0.15, 0.20, 0.10) " +
-                    "ON CONFLICT (model_name) DO NOTHING";
-            try (PreparedStatement stmt = conn.prepareStatement(tarifSql)) {
-                stmt.setString(1, DEFAULT_TARIF_MODEL);
-                stmt.executeUpdate();
-                log.debug("Default tarif model ensured in database");
-            }
         }
     }
 
@@ -52,42 +31,11 @@ public class DatabaseManager {
         return DriverManager.getConnection(JDBC_URL, USER, PASSWORD);
     }
 
-    /**
-     * Ensure a tarif record exists for the given model name
-     */
-    private void ensureTarifExists(String modelName) {
-        if (modelName == null || modelName.trim().isEmpty()) {
-            modelName = DEFAULT_TARIF_MODEL;
-        }
-
-        String sql = "INSERT INTO TARIFS (model_name, bw_print_price, colored_print_price, a3_print_price, a4_print_price) " +
-                "VALUES (?, 0.05, 0.15, 0.20, 0.10) " +
-                "ON CONFLICT (model_name) DO NOTHING";
-
-        try (Connection conn = getConnection();
-             PreparedStatement pstmt = conn.prepareStatement(sql)) {
-
-            pstmt.setString(1, modelName);
-            int rowsAffected = pstmt.executeUpdate();
-
-            if (rowsAffected > 0) {
-                log.debug("Created tarif record for model: {}", modelName);
-            }
-
-        } catch (SQLException e) {
-            log.error("Error ensuring tarif exists for model {}: {}", modelName, e.getMessage(), e);
-        }
-    }
-
     public UUID upsertPrinter(PrinterDevice printer) {
-        // Determine model name, use default if null/empty
         String modelName = printer.getModelName();
         if (modelName == null || modelName.trim().isEmpty()) {
-            modelName = DEFAULT_TARIF_MODEL;
+            modelName = "UNKNOWN_MODEL";
         }
-
-        // Ensure tarif record exists for this model
-        ensureTarifExists(modelName);
 
         String sql = """
         INSERT INTO PRINTER (model_name, serial_number, mac_address, ip_address, is_color, is_a3, client_id, last_updated)
@@ -589,10 +537,12 @@ public class DatabaseManager {
 
     /**
      * Get pricing information for a printer model
+     * Returns default prices if no specific pricing found in database
      */
     public Map<String, Double> getPrinterPricing(String modelName) {
         Map<String, Double> pricing = new HashMap<>();
 
+        // First try to get pricing from TARIFS table if it exists
         String sql = "SELECT bw_print_price, colored_print_price, a3_print_price, a4_print_price " +
                 "FROM TARIFS WHERE model_name = ?";
 
@@ -603,28 +553,70 @@ public class DatabaseManager {
             ResultSet rs = pstmt.executeQuery();
 
             if (rs.next()) {
+                // Found specific pricing for this model
                 pricing.put("bw_print_price", rs.getDouble("bw_print_price"));
                 pricing.put("colored_print_price", rs.getDouble("colored_print_price"));
                 pricing.put("a3_print_price", rs.getDouble("a3_print_price"));
                 pricing.put("a4_print_price", rs.getDouble("a4_print_price"));
+                log.debug("Found custom pricing for model: {}", modelName);
             } else {
-                // Return default pricing if model not found
-                pricing.put("bw_print_price", 0.05);
-                pricing.put("colored_print_price", 0.15);
-                pricing.put("a3_print_price", 0.20);
-                pricing.put("a4_print_price", 0.10);
+                // No specific pricing found, use defaults
+                setDefaultPricing(pricing);
+                log.debug("Using default pricing for model: {}", modelName);
             }
 
         } catch (SQLException e) {
-            log.error("Error getting pricing for model {}: {}", modelName, e.getMessage(), e);
-            // Return default pricing on error
-            pricing.put("bw_print_price", 0.05);
-            pricing.put("colored_print_price", 0.15);
-            pricing.put("a3_print_price", 0.20);
-            pricing.put("a4_print_price", 0.10);
+            log.warn("Error getting pricing for model {} (using defaults): {}", modelName, e.getMessage());
+            // Use default pricing on any database error
+            setDefaultPricing(pricing);
         }
 
         return pricing;
+    }
+
+    /**
+     * Set default pricing values
+     */
+    private void setDefaultPricing(Map<String, Double> pricing) {
+        pricing.put("bw_print_price", DEFAULT_BW_PRICE);
+        pricing.put("colored_print_price", DEFAULT_COLOR_PRICE);
+        pricing.put("a3_print_price", DEFAULT_A3_PRICE);
+        pricing.put("a4_print_price", DEFAULT_A4_PRICE);
+    }
+
+    /**
+     * Create a tarif record for a specific model (optional - only if needed)
+     */
+    public boolean createTarifForModel(String modelName, double bwPrice, double colorPrice, double a3Price, double a4Price) {
+        String sql = """
+        INSERT INTO TARIFS (model_name, bw_print_price, colored_print_price, a3_print_price, a4_print_price) 
+        VALUES (?, ?, ?, ?, ?) 
+        ON CONFLICT (model_name) 
+        DO UPDATE SET
+            bw_print_price = EXCLUDED.bw_print_price,
+            colored_print_price = EXCLUDED.colored_print_price,
+            a3_print_price = EXCLUDED.a3_print_price,
+            a4_print_price = EXCLUDED.a4_print_price
+        """;
+
+        try (Connection conn = getConnection();
+             PreparedStatement pstmt = conn.prepareStatement(sql)) {
+
+            pstmt.setString(1, modelName);
+            pstmt.setDouble(2, bwPrice);
+            pstmt.setDouble(3, colorPrice);
+            pstmt.setDouble(4, a3Price);
+            pstmt.setDouble(5, a4Price);
+
+            int rowsAffected = pstmt.executeUpdate();
+            log.info("Created/updated tarif for model {}: bw={}, color={}, a3={}, a4={}",
+                    modelName, bwPrice, colorPrice, a3Price, a4Price);
+            return rowsAffected > 0;
+
+        } catch (SQLException e) {
+            log.error("Error creating tarif for model {}: {}", modelName, e.getMessage(), e);
+            return false;
+        }
     }
 
     /**
